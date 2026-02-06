@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { HashRouter as Router, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
   Dumbbell, 
   History as HistoryIcon, 
@@ -20,23 +20,19 @@ import {
   Check,
   X,
   PlusCircle,
+  PlusSquare,
   Settings2,
   Home as HomeIcon,
   Calculator,
-  Activity,
-  BarChart3,
-  AlertTriangle,
-  PlusSquare,
   Clock,
   NotebookPen,
-  MessageSquareText,
   CalendarDays,
   Heart
 } from 'lucide-react';
 import { WorkoutSession, PersonalRecord, ActiveExercise, WorkoutSet, WorkoutTemplate, Exercise } from './types';
 import { EXERCISES as DEFAULT_EXERCISES, WORKOUT_TEMPLATES as DEFAULT_TEMPLATES } from './constants';
 import { getMotivationalQuote } from './services/geminiService';
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, YAxis, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, YAxis } from 'recharts';
 
 // --- Utils ---
 
@@ -48,7 +44,7 @@ const getStartOfWeek = (d: Date) => {
 };
 
 const formatDuration = (ms: number) => {
-  if (ms < 0 || isNaN(ms)) ms = 0;
+  if (ms <= 0 || isNaN(ms)) return "00:00:00";
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -78,25 +74,25 @@ const Toast = ({ message, visible }: { message: string, visible: boolean }) => (
 const ExitConfirmDialog = ({ onCancel, onConfirm }: { onCancel: () => void, onConfirm: () => void }) => (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6">
     <div className="bg-gray-900 border border-gray-800 w-full max-sm rounded-[32px] p-8 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
-      <div className="bg-amber-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-        <AlertTriangle size={32} className="text-amber-500" />
+      <div className="bg-indigo-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+        <Dumbbell size={32} className="text-indigo-500" />
       </div>
-      <h2 className="text-xl font-black text-white mb-3">Sair do treino?</h2>
+      <h2 className="text-xl font-black text-white mb-3">Sair para o Início?</h2>
       <p className="text-gray-400 text-sm mb-8 leading-relaxed">
-        Seu progresso atual é salvo automaticamente como rascunho.
+        Seu progresso atual fica salvo. O tempo total da academia continua contando.
       </p>
       <div className="flex flex-col gap-3">
         <button 
           onClick={onConfirm}
           className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98]"
         >
-          Sair para Início
+          Sair do Treino Atual
         </button>
         <button 
           onClick={onCancel}
           className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98]"
         >
-          Continuar Treino
+          Continuar Malhando
         </button>
       </div>
     </div>
@@ -126,12 +122,12 @@ const PlateCalculator = ({ weight, onClose }: { weight: number, onClose: () => v
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-6">
       <div className="bg-gray-900 border border-gray-800 w-full max-w-xs rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="font-black text-indigo-400 uppercase text-xs tracking-widest">Barra (20kg) + Anilhas</h3>
+          <h3 className="font-black text-indigo-400 uppercase text-xs tracking-widest">Anilhas (por lado)</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20}/></button>
         </div>
         <div className="text-center mb-6">
           <p className="text-4xl font-black text-white">{weight} <span className="text-sm text-gray-500">kg</span></p>
-          <p className="text-[10px] text-gray-500 uppercase mt-1">{plates.reduce((a, b) => a + b, 0)}kg por lado</p>
+          <p className="text-[10px] text-gray-500 uppercase mt-1">Total com Barra de 20kg</p>
         </div>
         <div className="space-y-2">
           {plates.length > 0 ? (
@@ -146,7 +142,7 @@ const PlateCalculator = ({ weight, onClose }: { weight: number, onClose: () => v
             <p className="text-xs text-center text-gray-600 italic">Peso apenas da barra.</p>
           )}
         </div>
-        <button onClick={onClose} className="w-full mt-8 bg-gray-800 py-3 rounded-xl font-bold text-sm">Entendido</button>
+        <button onClick={onClose} className="w-full mt-8 bg-gray-800 py-3 rounded-xl font-bold text-sm">Fechar</button>
       </div>
     </div>
   );
@@ -306,34 +302,76 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
   const [quote, setQuote] = useState("A disciplina é o destino.");
   const [activeDuration, setActiveDuration] = useState<string>("00:00:00");
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  const [timerIsRunning, setTimerIsRunning] = useState(false);
 
   useEffect(() => {
     getMotivationalQuote().then(setQuote);
     
     const interval = setInterval(() => {
-      const keysInternal = Object.keys(localStorage);
-      const activeDraftKeyInternal = keysInternal.find(k => k.startsWith('titanlift_draft_'));
       const startTimeKey = 'titanlift_active_start_time';
+      const elapsedTimeKey = 'titanlift_active_elapsed_time';
+      const timerRunningKey = 'titanlift_timer_is_running';
       
-      if (activeDraftKeyInternal) {
-        const templateId = activeDraftKeyInternal.replace('titanlift_draft_', '');
-        setActiveTemplateId(templateId);
-        
-        const startTime = localStorage.getItem(startTimeKey);
-        if (startTime) {
-          const diff = Date.now() - parseInt(startTime);
-          setActiveDuration(formatDuration(diff));
-        } else {
-          setActiveDuration("00:00:00");
-        }
+      // Encontrar qual o treino mais recente que está ativo
+      const lastActiveTemplate = localStorage.getItem('titanlift_last_active_template');
+      const keysInternal = Object.keys(localStorage);
+      const activeDraftKeys = keysInternal.filter(k => k.startsWith('titanlift_draft_'));
+      
+      if (activeDraftKeys.length > 0) {
+        // Prioriza o último que foi aberto, ou o primeiro que encontrar
+        const found = activeDraftKeys.find(k => k.includes(lastActiveTemplate || '')) || activeDraftKeys[0];
+        setActiveTemplateId(found.replace('titanlift_draft_', ''));
       } else {
-        setActiveDuration("00:00:00");
         setActiveTemplateId(null);
       }
-    }, 1000);
+
+      const isRunning = localStorage.getItem(timerRunningKey) === 'true';
+      setTimerIsRunning(isRunning);
+      
+      let totalMs = parseInt(localStorage.getItem(elapsedTimeKey) || '0');
+      if (isRunning) {
+        const startTime = localStorage.getItem(startTimeKey);
+        if (startTime) {
+          totalMs += Date.now() - parseInt(startTime);
+        }
+      }
+      setActiveDuration(formatDuration(totalMs));
+      
+    }, 200);
     
     return () => clearInterval(interval);
   }, []);
+
+  const handleTimerStart = () => {
+    localStorage.setItem('titanlift_active_start_time', Date.now().toString());
+    localStorage.setItem('titanlift_timer_is_running', 'true');
+    setTimerIsRunning(true);
+  };
+
+  const handleTimerPause = () => {
+    const startTime = localStorage.getItem('titanlift_active_start_time');
+    const elapsed = parseInt(localStorage.getItem('titanlift_active_elapsed_time') || '0');
+    if (startTime) {
+      const sessionElapsed = Date.now() - parseInt(startTime);
+      localStorage.setItem('titanlift_active_elapsed_time', (elapsed + sessionElapsed).toString());
+    }
+    localStorage.removeItem('titanlift_active_start_time');
+    localStorage.setItem('titanlift_timer_is_running', 'false');
+    setTimerIsRunning(false);
+  };
+
+  const handleTimerReset = () => {
+    if (window.confirm("Zerar cronômetro total da sua sessão na academia?")) {
+      // Hard Reset de todas as chaves de tempo
+      localStorage.setItem('titanlift_active_elapsed_time', '0');
+      localStorage.removeItem('titanlift_active_start_time');
+      localStorage.setItem('titanlift_timer_is_running', 'false');
+      
+      // Update UI state immediately
+      setTimerIsRunning(false);
+      setActiveDuration("00:00:00");
+    }
+  };
 
   const weekDaysStatus = useMemo(() => {
     const startOfWeek = getStartOfWeek(new Date());
@@ -344,7 +382,7 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
       const sessionDate = new Date(s.date);
       if (sessionDate.getTime() >= startOfWeek) {
         let dayIdx = sessionDate.getDay() - 1;
-        if (dayIdx === -1) dayIdx = 6; // Domingo
+        if (dayIdx === -1) dayIdx = 6;
         status[dayIdx] = true;
       }
     });
@@ -359,11 +397,10 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
         <p className="text-gray-400 italic text-sm">"{quote}"</p>
       </header>
 
-      {/* Calendário Semanal */}
       <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-5 mb-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500">Atividade Recente</h2>
-          <span className="text-[10px] font-bold text-indigo-400">Últimos 7 dias</span>
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500">Sua Semana</h2>
+          <span className="text-[10px] font-bold text-indigo-400">Freq. Semanal</span>
         </div>
         <div className="flex justify-between items-center px-2">
           {weekDaysStatus.map((day, i) => (
@@ -376,15 +413,14 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
         </div>
       </div>
 
-      {/* Cronômetro / Sessão Ativa */}
       <div className={`border rounded-[2.5rem] p-8 mb-10 transition-all duration-500 ${activeTemplateId ? 'bg-gradient-to-br from-indigo-900/30 to-indigo-950/50 border-indigo-500/30 shadow-[0_0_40px_rgba(99,102,241,0.1)]' : 'bg-gray-900 border-gray-800'}`}>
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <Clock size={20} className={activeTemplateId ? 'text-indigo-400 animate-pulse' : 'text-gray-500'} />
-            <h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Tempo de Treino</h2>
+            <Clock size={20} className={timerIsRunning ? 'text-indigo-400 animate-pulse' : 'text-gray-500'} />
+            <h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Tempo de Academia</h2>
           </div>
           {activeTemplateId && (
-            <Link to={`/active/${activeTemplateId}`} className="text-[10px] font-black uppercase bg-indigo-600 px-3 py-1 rounded-full text-white animate-pulse">Retomar</Link>
+            <Link to={`/active/${activeTemplateId}?resume=true`} className="text-[10px] font-black uppercase bg-indigo-600/20 px-3 py-1 rounded-full text-indigo-400 border border-indigo-500/30 animate-pulse">Retomar Treino</Link>
           )}
         </div>
         
@@ -392,17 +428,42 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
           <span className={`text-6xl font-black tabular-nums tracking-tighter ${activeDuration !== '00:00:00' ? 'text-white' : 'text-gray-700'}`}>
             {activeDuration}
           </span>
-          <p className="text-[10px] text-gray-500 mt-4 uppercase font-bold tracking-[0.2em]">
-            {activeTemplateId ? 'Sessão em andamento' : 'Escolha um treino para cronometrar'}
-          </p>
+          
+          <div className="flex items-center justify-center gap-4 mt-8 bg-gray-950/40 p-3 rounded-[2rem] border border-gray-800/50 max-w-[280px] mx-auto overflow-hidden">
+            <button 
+              onClick={handleTimerReset}
+              title="Resetar Cronômetro"
+              className="p-3.5 bg-gray-800 text-gray-400 rounded-2xl border border-gray-700 active:scale-90 transition-all hover:bg-gray-700 hover:text-red-400"
+            >
+              <RotateCcw size={18} />
+            </button>
+            
+            <div className="flex items-center gap-2 flex-1">
+              {timerIsRunning ? (
+                <button 
+                  onClick={handleTimerPause}
+                  className="flex-1 p-3.5 rounded-2xl border transition-all active:scale-90 flex items-center justify-center bg-amber-500/10 border-amber-500/40 text-amber-500"
+                >
+                  <Pause size={20} fill="currentColor" />
+                </button>
+              ) : (
+                <button 
+                  onClick={handleTimerStart}
+                  className="flex-1 p-3.5 rounded-2xl border transition-all active:scale-90 flex items-center justify-center bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/20"
+                >
+                  <Play size={20} fill="currentColor" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       <section className="mb-10">
         <div className="flex justify-between items-end mb-6">
-          <h2 className="text-xl font-bold text-gray-100">Treinos Prontos</h2>
+          <h2 className="text-xl font-bold text-gray-100">Planos</h2>
           <Link to="/workouts" className="text-indigo-400 text-sm font-medium flex items-center gap-1 hover:underline">
-            Explorar <ArrowRight size={14} />
+            Ver Todos <ArrowRight size={14} />
           </Link>
         </div>
         
@@ -432,7 +493,7 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
             <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-600/20"><HistoryIcon size={24} className="text-white" /></div>
             <div>
               <h3 className="font-bold text-lg">Histórico</h3>
-              <p className="text-gray-500 text-xs">Mantido por 7 dias</p>
+              <p className="text-gray-500 text-xs">Últimas sessões</p>
             </div>
           </div>
           <ChevronRight className="text-indigo-500 group-hover:translate-x-1 transition-transform" />
@@ -517,7 +578,7 @@ const WorkoutList = ({
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <div className="flex justify-between items-center mb-8 pt-4">
-        <h1 className="text-3xl font-black">Seus Planos</h1>
+        <h1 className="text-3xl font-black">Planos de Treino</h1>
         <button 
           onClick={() => {
             setIsManageMode(!isManageMode);
@@ -532,21 +593,19 @@ const WorkoutList = ({
 
       {isManageMode && (
         <div className="mb-10 animate-in fade-in slide-in-from-top-4 bg-gray-900/40 p-5 rounded-3xl border border-gray-800">
-          <h2 className="text-indigo-400 font-black text-[10px] uppercase tracking-widest mb-4">Base de Exercícios (Toque no nome para editar)</h2>
+          <h2 className="text-indigo-400 font-black text-[10px] uppercase tracking-widest mb-4">Base de Exercícios (Clique para editar)</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {exercises.map(ex => (
               <div key={ex.id} className="bg-gray-900 border border-gray-800 p-3 rounded-xl flex justify-between items-center gap-2">
                 {editingExerciseId === ex.id ? (
-                  <div className="flex w-full gap-1">
-                    <input 
-                      className="bg-gray-800 text-white text-[16px] w-full p-2 rounded-lg outline-none border border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                      value={tempName}
-                      onChange={e => setTempName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && saveEditExercise()}
-                      onBlur={saveEditExercise}
-                      autoFocus
-                    />
-                  </div>
+                  <input 
+                    className="bg-gray-800 text-white text-[16px] w-full p-2 rounded-lg outline-none border border-indigo-500"
+                    value={tempName}
+                    onChange={e => setTempName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveEditExercise()}
+                    onBlur={saveEditExercise}
+                    autoFocus
+                  />
                 ) : (
                   <>
                     <span className="text-[12px] truncate font-bold text-gray-100">{ex.name}</span>
@@ -567,44 +626,27 @@ const WorkoutList = ({
                 {editingTemplateId === template.id ? (
                   <div className="flex items-center gap-2 flex-1">
                     <input 
-                      className="bg-gray-800 border border-indigo-500 rounded-2xl px-4 py-3 text-white font-bold outline-none flex-1 text-[16px] focus:ring-2 focus:ring-indigo-500"
+                      className="bg-gray-800 border border-indigo-500 rounded-2xl px-4 py-3 text-white font-bold outline-none flex-1 text-[16px]"
                       value={tempName}
                       onChange={e => setTempName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && saveEditTemplate()}
                       autoFocus
                     />
-                    <button onClick={saveEditTemplate} className="text-white bg-emerald-600 p-3 rounded-2xl shadow-lg shadow-emerald-600/20"><Check size={20}/></button>
+                    <button onClick={saveEditTemplate} className="text-white bg-emerald-600 p-3 rounded-2xl shadow-lg"><Check size={20}/></button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 w-full justify-between">
                     <div className="flex items-center gap-2">
                       <h3 className="text-xl font-black text-gray-100">{template.name}</h3>
                       {isManageMode && (
-                        <button 
-                          onClick={() => startEditTemplate(template)}
-                          className="text-gray-500 hover:text-indigo-400 p-1"
-                        >
-                          <Edit2 size={16} />
-                        </button>
+                        <button onClick={() => startEditTemplate(template)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={16} /></button>
                       )}
                     </div>
                     <div className="flex items-center gap-3">
                        {isManageMode ? (
-                        <button 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            deleteTemplate(template.id);
-                          }} 
-                          className="bg-red-500/10 text-red-500 p-3 rounded-2xl border border-red-500/20 hover:bg-red-500/20 active:scale-90 transition-all z-10"
-                        >
-                          <Trash2 size={20}/>
-                        </button>
+                        <button onClick={() => deleteTemplate(template.id)} className="bg-red-500/10 text-red-500 p-3 rounded-2xl border border-red-500/20"><Trash2 size={20}/></button>
                       ) : (
-                        <Link 
-                          to={`/active/${template.id}`} 
-                          className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl shadow-indigo-600/30 active:scale-95 transition-all"
-                        >
+                        <Link to={`/active/${template.id}`} className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl shadow-indigo-600/30 active:scale-95 transition-all">
                            <Play size={20} fill="currentColor" />
                         </Link>
                       )}
@@ -625,12 +667,11 @@ const WorkoutList = ({
         ))}
       </div>
       
-      {/* Botões Flutuantes Compactos */}
       <div className="fixed bottom-24 right-6 flex flex-col gap-4 items-center z-50 md:bottom-10 md:right-10">
-        <Link to="/" className="bg-gray-800 p-3.5 rounded-full shadow-2xl text-gray-400 hover:text-white transition-all border border-gray-700 active:scale-90 hover:bg-gray-750">
+        <Link to="/" className="bg-gray-800 p-3.5 rounded-full shadow-2xl text-gray-400 border border-gray-700 active:scale-90">
           <HomeIcon size={22} />
         </Link>
-        <button onClick={addNewWorkout} className="bg-indigo-600 p-4 rounded-full shadow-2xl text-white hover:bg-indigo-500 transition-all border border-indigo-400 active:scale-90 shadow-indigo-600/40">
+        <button onClick={addNewWorkout} className="bg-indigo-600 p-4 rounded-full shadow-2xl text-white border border-indigo-400 active:scale-90">
           <Plus size={26} strokeWidth={3} />
         </button>
       </div>
@@ -642,49 +683,91 @@ const ActiveWorkout = ({
   prs, 
   templates, 
   exercises,
+  onUpdateTemplates,
   onUpdateExercises,
   onSaveSession 
 }: { 
   prs: PersonalRecord[], 
   templates: WorkoutTemplate[], 
   exercises: Exercise[],
+  onUpdateTemplates: (t: WorkoutTemplate[]) => void,
   onUpdateExercises: (e: Exercise[]) => void,
   onSaveSession: (session: WorkoutSession) => void 
 }) => {
   const { id: templateId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const template = templates.find(t => t.id === templateId);
+  const searchParams = new URLSearchParams(location.search);
+  const isResuming = searchParams.get('resume') === 'true';
   
   const DRAFT_KEY = `titanlift_draft_${templateId}`;
   const START_TIME_KEY = 'titanlift_active_start_time';
+  const TIMER_RUNNING_KEY = 'titanlift_timer_is_running';
+  const LAST_ACTIVE_IDX_KEY = `titanlift_last_idx_${templateId}`;
   
+  const exerciseRefs = useRef<(HTMLDivElement | null)[]>([]);
+
   const [activeExercises, setActiveExercises] = useState<ActiveExercise[]>(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
       try { return JSON.parse(draft); } catch(e) { }
     }
-    return template?.exercises.map(exId => ({
-      exerciseId: exId,
-      name: exercises.find(e => e.id === exId)?.name || 'Exercício',
-      sets: Array(3).fill(null).map(() => ({ reps: 10, weight: 0, completed: false })),
-      notes: ''
-    })) || [];
+    
+    return template?.exercises.map(exId => {
+      const memoryKey = `titanlift_config_v2_${exId}`;
+      const memory = localStorage.getItem(memoryKey);
+      
+      if (memory) {
+        try {
+          const config = JSON.parse(memory);
+          return {
+            exerciseId: exId,
+            name: exercises.find(e => e.id === exId)?.name || 'Exercício',
+            sets: config.sets.map((s: any) => ({ ...s, completed: false })),
+            notes: config.notes || ''
+          };
+        } catch {}
+      }
+
+      return {
+        exerciseId: exId,
+        name: exercises.find(e => e.id === exId)?.name || 'Exercício',
+        sets: Array(3).fill(null).map(() => ({ reps: 10, weight: 0, completed: false })),
+        notes: ''
+      };
+    }) || [];
   });
 
   const [activeDuration, setActiveDuration] = useState("00:00:00");
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
+  const [focusedExerciseIdx, setFocusedExerciseIdx] = useState<number | null>(null);
 
   useEffect(() => {
+    localStorage.setItem('titanlift_last_active_template', templateId || '');
+    
     const interval = setInterval(() => {
-      const startTime = localStorage.getItem(START_TIME_KEY);
-      if (startTime) {
-        setActiveDuration(formatDuration(Date.now() - parseInt(startTime)));
-      } else {
-        setActiveDuration("00:00:00");
+      const isRunning = localStorage.getItem(TIMER_RUNNING_KEY) === 'true';
+      const elapsedTimeKey = 'titanlift_active_elapsed_time';
+      let totalMs = parseInt(localStorage.getItem(elapsedTimeKey) || '0');
+      
+      if (isRunning) {
+        const startTime = localStorage.getItem(START_TIME_KEY);
+        if (startTime) totalMs += Date.now() - parseInt(startTime);
       }
-    }, 1000);
+      setActiveDuration(formatDuration(totalMs));
+    }, 200);
+
+    if (isResuming) {
+      const lastIdx = parseInt(localStorage.getItem(LAST_ACTIVE_IDX_KEY) || '0');
+      setTimeout(() => {
+        setFocusedExerciseIdx(lastIdx);
+        exerciseRefs.current[lastIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 400);
+    }
+
     return () => clearInterval(interval);
-  }, []);
+  }, [isResuming, templateId]);
 
   useEffect(() => {
     localStorage.setItem(DRAFT_KEY, JSON.stringify(activeExercises));
@@ -698,8 +781,9 @@ const ActiveWorkout = ({
   const [newExerciseName, setNewExerciseName] = useState("");
 
   const startSessionTimer = () => {
-    if (!localStorage.getItem(START_TIME_KEY)) {
+    if (localStorage.getItem(TIMER_RUNNING_KEY) !== 'true' && parseInt(localStorage.getItem('titanlift_active_elapsed_time') || '0') === 0) {
       localStorage.setItem(START_TIME_KEY, Date.now().toString());
+      localStorage.setItem(TIMER_RUNNING_KEY, 'true');
     }
   };
 
@@ -707,9 +791,17 @@ const ActiveWorkout = ({
   const totalSets = useMemo(() => activeExercises.reduce((acc, ex) => acc + ex.sets.length, 0), [activeExercises]);
   const overallProgress = totalSets > 0 ? (totalCompletedSets / totalSets) * 100 : 0;
 
+  const persistExerciseConfig = (exerciseIdx: number) => {
+    const ex = activeExercises[exerciseIdx];
+    const memoryKey = `titanlift_config_v2_${ex.exerciseId}`;
+    localStorage.setItem(memoryKey, JSON.stringify({
+      sets: ex.sets.map(s => ({ weight: s.weight, reps: s.reps })),
+      notes: ex.notes
+    }));
+  };
+
   const updateSet = (exerciseIndex: number, setIndex: number, field: keyof WorkoutSet, value: any) => {
     startSessionTimer();
-    
     const updated = [...activeExercises];
     const oldValue = updated[exerciseIndex].sets[setIndex][field];
     updated[exerciseIndex].sets[setIndex] = { ...updated[exerciseIndex].sets[setIndex], [field]: value };
@@ -717,8 +809,11 @@ const ActiveWorkout = ({
     if (field === 'completed' && value === true && oldValue === false) {
       const exId = updated[exerciseIndex].exerciseId;
       window.dispatchEvent(new CustomEvent('titanlift_start_rest', { detail: { exerciseId: exId } }));
+      localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
     }
-    
+
+    // Salvamento individual para evitar perda de dados
+    persistExerciseConfig(exerciseIndex);
     setActiveExercises(updated);
   };
 
@@ -726,15 +821,41 @@ const ActiveWorkout = ({
     const updated = [...activeExercises];
     updated[exerciseIndex].notes = value;
     setActiveExercises(updated);
+    persistExerciseConfig(exerciseIndex);
   };
 
-  const addExercise = (ex: Exercise) => {
-    setActiveExercises([...activeExercises, {
+  const addExerciseToPlan = (ex: Exercise) => {
+    const memoryKey = `titanlift_config_v2_${ex.id}`;
+    const memory = localStorage.getItem(memoryKey);
+    let initialSets = Array(3).fill(null).map(() => ({ reps: 10, weight: 0, completed: false }));
+    let initialNotes = '';
+
+    if (memory) {
+      try {
+        const config = JSON.parse(memory);
+        initialSets = config.sets.map((s: any) => ({ ...s, completed: false }));
+        initialNotes = config.notes || '';
+      } catch {}
+    }
+
+    setActiveExercises(prev => [...prev, {
       exerciseId: ex.id,
       name: ex.name,
-      sets: [{ reps: 10, weight: 0, completed: false }],
-      notes: ''
+      sets: initialSets,
+      notes: initialNotes
     }]);
+
+    if (templateId && templateId !== 'custom') {
+      const updatedTemplates = templates.map(t => {
+        if (t.id === templateId) {
+          const newExercisesList = [...t.exercises];
+          if (!newExercisesList.includes(ex.id)) newExercisesList.push(ex.id);
+          return { ...t, exercises: newExercisesList };
+        }
+        return t;
+      });
+      onUpdateTemplates(updatedTemplates);
+    }
     setShowAddExerciseList(false);
   };
 
@@ -746,19 +867,20 @@ const ActiveWorkout = ({
       category: 'Personalizado'
     };
     onUpdateExercises([...exercises, newEx]);
-    setActiveExercises([...activeExercises, {
-      exerciseId: newEx.id,
-      name: newEx.name,
-      sets: [{ reps: 10, weight: 0, completed: false }],
-      notes: ''
-    }]);
+    addExerciseToPlan(newEx);
     setNewExerciseName("");
     setShowAddExerciseList(false);
   };
 
   const handleFinish = () => {
-    const startTime = localStorage.getItem(START_TIME_KEY);
-    const durationMs = startTime ? Date.now() - parseInt(startTime) : 0;
+    // Calculamos o tempo gasto ATÉ O MOMENTO (baseado na diferença se o timer estiver rodando)
+    const isRunning = localStorage.getItem(TIMER_RUNNING_KEY) === 'true';
+    const elapsedBase = parseInt(localStorage.getItem('titanlift_active_elapsed_time') || '0');
+    let finalMs = elapsedBase;
+    if (isRunning) {
+      const startTime = localStorage.getItem(START_TIME_KEY);
+      if (startTime) finalMs += Date.now() - parseInt(startTime);
+    }
     
     const session: WorkoutSession = {
       id: Date.now().toString(),
@@ -766,18 +888,21 @@ const ActiveWorkout = ({
       templateName: template?.name || 'Personalizado',
       date: new Date().toISOString(),
       exercises: activeExercises,
-      durationMs: durationMs
+      durationMs: finalMs
     };
+    
     onSaveSession(session);
+    
+    // IMPORTANTE: Limpamos apenas o rascunho DESTE treino
+    // O cronômetro "Tempo de Academia" na Home CONTINUA contando, pois ele é global da sessão.
     localStorage.removeItem(DRAFT_KEY);
-    localStorage.removeItem(START_TIME_KEY);
-    Object.keys(localStorage).forEach(k => {
-      if (k.startsWith('titanlift_rest_end_')) localStorage.removeItem(k);
-    });
+    localStorage.removeItem(LAST_ACTIVE_IDX_KEY);
+    localStorage.removeItem('titanlift_last_active_template');
+    
     navigate(`/result/${session.id}`);
   };
 
-  if (!template) return <div className="p-10 text-center text-gray-500">Treino não encontrado</div>;
+  if (!template) return <div className="p-10 text-center text-gray-500">Plano não encontrado</div>;
 
   return (
     <div className="p-4 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
@@ -785,11 +910,11 @@ const ActiveWorkout = ({
           <div className="max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-2">
                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                 <Clock size={12} className={activeDuration !== "00:00:00" ? "animate-pulse" : ""} /> {activeDuration}
+                 <Clock size={12} /> Academia: {activeDuration}
                </span>
                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{Math.round(overallProgress)}%</span>
             </div>
-            <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden shadow-inner">
+            <div className="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
                <div className="h-full bg-indigo-500 transition-all duration-700 ease-in-out shadow-[0_0_15px_rgba(99,102,241,0.5)]" style={{width: `${overallProgress}%`}} />
             </div>
           </div>
@@ -797,160 +922,148 @@ const ActiveWorkout = ({
 
       <div className="flex justify-between items-center mb-6 pt-36">
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowExitConfirm(true)} className="p-2 -ml-2 text-gray-500 hover:text-white active:scale-90 transition-all"><ArrowLeft size={24} /></button>
+          <button onClick={() => setShowExitConfirm(true)} className="p-2 -ml-2 text-gray-500 hover:text-white transition-all"><ArrowLeft size={24} /></button>
           <h1 className="text-2xl font-black truncate max-w-[180px]">{template.name}</h1>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={() => setIsManageMode(!isManageMode)} 
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl transition-all ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-          >
-            <Settings2 size={18} />
-            <span className="hidden sm:inline">Gerenciar</span>
-            {isManageMode && <span className="sm:hidden">Sair</span>}
+          <button onClick={() => setIsManageMode(!isManageMode)} className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl transition-all ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+            <Settings2 size={18} /> <span className="hidden sm:inline">Gerenciar</span>
           </button>
-          <button onClick={handleFinish} className="bg-emerald-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl shadow-emerald-600/20 active:scale-95 transition-all">Finalizar</button>
+          <button onClick={handleFinish} className="bg-emerald-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-emerald-500 active:scale-95 transition-all">Finalizar</button>
         </div>
       </div>
 
-      <div className="space-y-6">
-        {activeExercises.map((ex, exIdx) => (
-          <div key={exIdx} className="bg-gray-900 rounded-[2rem] p-4 border border-gray-800 shadow-xl relative">
-            <div className="flex justify-between items-center mb-4 px-2">
-              <div className="flex-1 flex items-center gap-2">
-                {editingExIndex === exIdx ? (
-                  <div className="flex gap-2 w-full items-center">
-                    <input 
-                      className="bg-gray-800 border border-indigo-500 rounded-xl px-3 py-2 text-white font-bold outline-none flex-1 text-[16px]"
-                      value={ex.name}
-                      onChange={(e) => {
-                        const updated = [...activeExercises];
-                        updated[exIdx].name = e.target.value;
-                        setActiveExercises(updated);
-                      }}
-                      onKeyDown={(e) => e.key === 'Enter' && setEditingExIndex(null)}
-                      autoFocus
-                    />
-                    <button onClick={() => setEditingExIndex(null)} className="bg-emerald-600 text-white p-2 rounded-xl active:scale-90 transition-all"><Check size={18} /></button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-black text-gray-100">{ex.name}</h2>
-                    <button 
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx);
-                      }} 
-                      className={`p-2 rounded-lg transition-colors flex items-center justify-center ${ex.notes ? 'bg-indigo-600/20 text-indigo-400' : 'text-gray-600 hover:text-indigo-400'}`}
-                    >
-                      <NotebookPen size={18} />
-                    </button>
-                    {isManageMode && (
-                      <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 p-1"><Edit2 size={14} /></button>
-                    )}
-                  </div>
+      <div className="space-y-4">
+        {activeExercises.map((ex, exIdx) => {
+          const isFocused = focusedExerciseIdx === exIdx;
+          return (
+            <div 
+              key={exIdx} 
+              ref={el => { exerciseRefs.current[exIdx] = el; }}
+              onClick={() => {
+                setFocusedExerciseIdx(exIdx);
+                localStorage.setItem(LAST_ACTIVE_IDX_KEY, exIdx.toString());
+              }}
+              className={`bg-gray-900 rounded-[2rem] p-4 border transition-all duration-300 shadow-xl relative overflow-hidden ${isFocused ? 'border-indigo-500/50 bg-gray-900/90' : 'border-gray-800'}`}
+            >
+              {isFocused && (
+                <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,1)]" />
+              )}
+
+              <div className="flex justify-between items-center mb-4 px-2">
+                <div className="flex-1 flex items-center gap-2">
+                  {editingExIndex === exIdx ? (
+                    <div className="flex gap-2 w-full items-center">
+                      <input 
+                        className="bg-gray-800 border border-indigo-500 rounded-xl px-3 py-2 text-white font-bold outline-none flex-1 text-[16px]"
+                        value={ex.name}
+                        onChange={(e) => {
+                          const updated = [...activeExercises];
+                          updated[exIdx].name = e.target.value;
+                          setActiveExercises(updated);
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && setEditingExIndex(null)}
+                        autoFocus
+                      />
+                      <button onClick={() => setEditingExIndex(null)} className="bg-emerald-600 text-white p-2 rounded-xl transition-all active:scale-90"><Check size={18} /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <h2 className={`text-lg font-black transition-colors ${isFocused ? 'text-indigo-400' : 'text-gray-100'}`}>{ex.name}</h2>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx); }} 
+                        className={`p-2 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
+                      >
+                        <NotebookPen size={18} />
+                      </button>
+                      {isManageMode && <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={14} /></button>}
+                    </div>
+                  )}
+                </div>
+                {isManageMode && (
+                  <button onClick={() => { if (confirm("Remover este exercício do treino atual?")) { const updated = [...activeExercises]; updated.splice(exIdx, 1); setActiveExercises(updated); } }} className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 ml-2 transition-all active:scale-90">
+                    <Trash2 size={16} />
+                  </button>
                 )}
               </div>
-              
-              {isManageMode && (
-                <button 
-                  onClick={() => {
-                    if (confirm("Remover exercício do treino atual?")) {
-                      const updated = [...activeExercises];
-                      updated.splice(exIdx, 1);
-                      setActiveExercises(updated);
-                    }
-                  }}
-                  className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 ml-2"
-                >
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </div>
 
-            {editingNoteIndex === exIdx && (
-              <div className="px-2 mb-4 animate-in slide-in-from-top-2 duration-200">
-                <textarea
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-xs text-gray-300 outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px]"
-                  placeholder="Instruções e lembretes para este exercício..."
-                  value={ex.notes}
-                  onChange={(e) => updateNote(exIdx, e.target.value)}
+              {editingNoteIndex === exIdx && (
+                <textarea 
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-xs text-gray-300 mb-4 h-24 outline-none focus:ring-1 focus:ring-indigo-500" 
+                  placeholder="Dicas técnicas ou observações da série..." 
+                  value={ex.notes} 
+                  onChange={(e) => updateNote(exIdx, e.target.value)} 
                 />
-              </div>
-            )}
-            
-            <div className="mb-6"><RestTimer exerciseId={ex.exerciseId} /></div>
-            
-            <div className="space-y-1.5 mb-5">
-              <div className="grid gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] text-[9px] font-black text-gray-600 px-2 uppercase text-center items-center mb-1">
-                <span>Série</span><span>Peso (kg)</span><span>Reps</span><span>OK</span><span />
-              </div>
-              {ex.sets.map((set, setIdx) => (
-                <div key={setIdx} className="grid items-center gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem]">
-                  <span className="text-xs font-black text-gray-600 text-center">{setIdx + 1}</span>
-                  <div className="relative">
-                    <input
-                      type="number" inputMode="decimal"
-                      className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 outline-none text-[16px] focus:ring-2 focus:ring-indigo-500 focus:bg-gray-750 transition-all"
-                      value={set.weight === 0 ? '' : set.weight}
-                      placeholder="0"
-                      onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value === '' ? 0 : Number(e.target.value))}
-                    />
-                    <button onClick={() => setPlateWeight(Number(set.weight))} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={14}/></button>
-                  </div>
-                  <div className="relative">
-                    <select
-                      className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 outline-none text-[16px] appearance-none cursor-pointer text-gray-300 focus:ring-2 focus:ring-indigo-500"
-                      value={set.reps || 10}
+              )}
+              
+              <div className="mb-6"><RestTimer exerciseId={ex.exerciseId} /></div>
+              
+              <div className="space-y-1.5 mb-5">
+                <div className="grid gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] text-[9px] font-black text-gray-600 px-2 uppercase text-center items-center mb-1">
+                  <span>Série</span><span>Peso (kg)</span><span>Reps</span><span>OK</span><span />
+                </div>
+                {ex.sets.map((set, setIdx) => (
+                  <div key={setIdx} className="grid items-center gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem]">
+                    <span className="text-xs font-black text-gray-600 text-center">{setIdx + 1}</span>
+                    <div className="relative">
+                      <input 
+                        type="number" inputMode="decimal" 
+                        className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] outline-none focus:ring-2 focus:ring-indigo-500 transition-all" 
+                        value={set.weight === 0 ? '' : set.weight} 
+                        placeholder="0" 
+                        onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value === '' ? 0 : Number(e.target.value))} 
+                      />
+                      <button onClick={() => setPlateWeight(Number(set.weight))} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={14}/></button>
+                    </div>
+                    <select 
+                      className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] appearance-none outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer" 
+                      value={set.reps || 10} 
                       onChange={(e) => updateSet(exIdx, setIdx, 'reps', Number(e.target.value))}
                     >
-                      {Array.from({ length: 25 }, (_, i) => i + 1).map(v => <option key={v} value={v}>{v}</option>)}
+                      {Array.from({ length: 30 }, (_, i) => i + 1).map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
+                    <button 
+                      className={`h-11 w-full rounded-xl flex items-center justify-center transition-all ${set.completed ? 'bg-emerald-600 text-white shadow-emerald-600/20' : 'bg-gray-800 text-gray-600'}`} 
+                      onClick={() => updateSet(exIdx, setIdx, 'completed', !set.completed)}
+                    ><CheckCircle2 size={20} /></button>
+                    <button 
+                      onClick={() => { const updated = [...activeExercises]; updated[exIdx].sets.splice(setIdx, 1); setActiveExercises(updated); persistExerciseConfig(exIdx); }} 
+                      disabled={ex.sets.length <= 1} 
+                      className="text-gray-700 hover:text-red-500 p-2 disabled:opacity-0 transition-all"
+                    ><Trash2 size={16}/></button>
                   </div>
-                  <button
-                    className={`h-11 w-full rounded-xl flex items-center justify-center transition-all shadow-sm ${set.completed ? 'bg-emerald-600 text-white shadow-emerald-600/20' : 'bg-gray-800 text-gray-600'}`}
-                    onClick={() => updateSet(exIdx, setIdx, 'completed', !set.completed)}
-                  ><CheckCircle2 size={20} /></button>
-                  <button onClick={() => {
-                    const updated = [...activeExercises];
-                    updated[exIdx].sets.splice(setIdx, 1);
-                    setActiveExercises(updated);
-                  }} disabled={ex.sets.length <= 1} className="text-gray-700 hover:text-red-500 p-2 disabled:opacity-0"><Trash2 size={16}/></button>
-                </div>
-              ))}
+                ))}
+              </div>
+              <button 
+                onClick={() => { const updated = [...activeExercises]; const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1]; updated[exIdx].sets.push({...lastSet, completed: false}); setActiveExercises(updated); persistExerciseConfig(exIdx); }} 
+                className="w-full border border-dashed border-gray-800 text-gray-500 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800/50 transition-all active:scale-95"
+              >
+                <Plus size={14} className="inline mr-1"/> Nova Série
+              </button>
             </div>
-            <button onClick={() => {
-              const updated = [...activeExercises];
-              const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1];
-              updated[exIdx].sets.push({...lastSet, completed: false});
-              setActiveExercises(updated);
-            }} className="w-full border border-dashed border-gray-800 text-gray-500 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2">
-              <Plus size={14}/> Próxima Série
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <button onClick={() => setShowAddExerciseList(true)} className="w-full mt-8 bg-gray-900 border border-indigo-500/20 text-indigo-400 py-4 rounded-3xl font-black text-xs uppercase tracking-widest active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10"><PlusCircle size={20}/> Adicionar Exercício</button>
+      <button onClick={() => setShowAddExerciseList(true)} className="w-full mt-8 bg-gray-900 border border-indigo-500/20 text-indigo-400 py-4 rounded-3xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 active:scale-95 transition-all"><PlusCircle size={20}/> Incluir Exercício</button>
       
       {showAddExerciseList && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[300] p-6 pt-20 animate-in fade-in zoom-in-95 duration-200 flex flex-col">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[300] p-6 pt-20 animate-in fade-in zoom-in-95 flex flex-col">
            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-black">Adicionar Exercício</h3>
-              <button onClick={() => setShowAddExerciseList(false)} className="bg-gray-800 p-2 rounded-full"><X size={24}/></button>
+              <h3 className="text-2xl font-black">Lista de Exercícios</h3>
+              <button onClick={() => setShowAddExerciseList(false)} className="bg-gray-800 p-2 rounded-full active:scale-90 transition-all"><X size={24}/></button>
            </div>
            <div className="bg-gray-900 border border-gray-800 p-4 rounded-3xl mb-8">
              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Novo Exercício</p>
              <div className="flex gap-2">
-               <input className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white font-bold outline-none text-[16px] focus:ring-2 focus:ring-indigo-500" placeholder="Nome do exercício..." value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateNewExercise()} />
-               <button onClick={handleCreateNewExercise} className="bg-indigo-600 text-white p-3 rounded-xl active:scale-90 disabled:opacity-50" disabled={!newExerciseName.trim()}><PlusSquare size={24}/></button>
+               <input className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white font-bold outline-none text-[16px] focus:ring-2 focus:ring-indigo-500" placeholder="Nome do movimento..." value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateNewExercise()} />
+               <button onClick={handleCreateNewExercise} className="bg-indigo-600 text-white p-3 rounded-xl disabled:opacity-50 active:scale-90 transition-all" disabled={!newExerciseName.trim()}><PlusSquare size={24}/></button>
              </div>
            </div>
-           <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Base de Exercícios</p>
+           <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Sua Biblioteca</p>
            <div className="grid gap-3 overflow-y-auto flex-1 no-scrollbar pb-20">
               {exercises.map(ex => (
-                <button key={ex.id} onClick={() => addExercise(ex)} className="bg-gray-900 border border-gray-800 p-5 rounded-[2rem] text-left transition-all flex items-center justify-between group active:bg-gray-800">
+                <button key={ex.id} onClick={() => addExerciseToPlan(ex)} className="bg-gray-900 border border-gray-800 p-5 rounded-[2rem] text-left flex items-center justify-between group active:bg-gray-800 transition-all">
                   <span className="font-bold text-lg text-gray-100">{ex.name}</span>
                   <Plus className="text-indigo-500 group-active:scale-125 transition-transform" />
                 </button>
@@ -976,19 +1089,18 @@ const WorkoutResult = ({ sessions }: { sessions: WorkoutSession[] }) => {
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <div className="text-center mb-10 pt-4">
         <div className="inline-flex bg-emerald-600 p-6 rounded-[2.5rem] mb-6 shadow-2xl animate-bounce"><Trophy size={48} className="text-white" /></div>
-        <h1 className="text-4xl font-black mb-2 text-white">Treino Finalizado!</h1>
-        <p className="text-gray-500 font-medium">Missão cumprida com sucesso.</p>
+        <h1 className="text-4xl font-black mb-2 text-white">Treino Salvo!</h1>
+        <p className="text-gray-500 font-medium">Histórico atualizado com sucesso.</p>
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-[2.5rem] p-8 mb-6 shadow-xl">
         <div className="flex flex-col items-center gap-2 mb-8">
-            <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest">Tempo Total de Atividade</p>
-            <p className="text-5xl font-black text-indigo-400 tabular-nums">{formatDuration(session.durationMs || 0)}</p>
+            <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest">Sessão Finalizada em</p>
             <p className="text-xs text-gray-500 mt-2 font-bold">{new Date(session.date).toLocaleDateString()} às {new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
         
         <div className="space-y-4 mb-8">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 border-b border-gray-800 pb-2">Resumo de Exercícios</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 border-b border-gray-800 pb-2">Exercícios Realizados</h3>
             {session.exercises.map((ex, i) => (
                 <div key={i} className="flex justify-between items-center py-1">
                     <span className="text-sm font-bold text-gray-300">{ex.name}</span>
@@ -997,39 +1109,24 @@ const WorkoutResult = ({ sessions }: { sessions: WorkoutSession[] }) => {
             ))}
         </div>
 
-        {/* Mensagem de Agradecimento */}
         <div className="mt-10 pt-8 border-t border-gray-800 text-center space-y-4">
-          <div className="inline-flex items-center justify-center p-2 bg-indigo-500/10 rounded-full text-indigo-400">
-            <Heart size={16} fill="currentColor" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-black text-gray-100 tracking-tight">Obrigado por usar o TitanLift!</p>
-            <p className="text-[10px] text-gray-500 font-medium uppercase tracking-[0.1em]">Sua evolução é o nosso combustível.</p>
-          </div>
+          <div className="inline-flex items-center justify-center p-2 bg-indigo-500/10 rounded-full text-indigo-400"><Heart size={16} fill="currentColor" /></div>
+          <p className="text-sm font-black text-gray-100">TitanLift: Evolução é o foco.</p>
         </div>
       </div>
 
-      <button onClick={() => navigate('/')} className="w-full bg-indigo-600 py-5 rounded-3xl font-black uppercase tracking-widest text-sm shadow-2xl active:scale-95 transition-all">Ir para o Início</button>
+      <button onClick={() => navigate('/')} className="w-full bg-indigo-600 py-5 rounded-3xl font-black uppercase tracking-widest text-sm shadow-2xl active:scale-95 transition-all">Ir para a Home</button>
     </div>
   );
 };
 
 const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], onDeleteSession: (id: string) => void }) => {
-  const preciseTimeStats = useMemo(() => {
-    // Ordena treinos da última semana por data crescente para o gráfico
-    return [...sessions]
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .map(s => {
-        const d = new Date(s.date);
-        return {
-          timestamp: d.getTime(),
-          displayTime: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          displayDate: d.toLocaleDateString([], { day: '2-digit', month: '2-digit' }),
-          displayFull: `${d.toLocaleDateString([], { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-          seconds: Math.round((s.durationMs || 0) / 1000),
-          duration: formatDuration(s.durationMs || 0)
-        };
-      });
+  const stats = useMemo(() => {
+    return [...sessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map(s => ({
+      displayFull: `${new Date(s.date).toLocaleDateString([], { day: '2-digit', month: '2-digit' })}`,
+      seconds: Math.round((s.durationMs || 0) / 1000),
+      duration: formatDuration(s.durationMs || 0)
+    }));
   }, [sessions]);
 
   return (
@@ -1037,36 +1134,13 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
       <h1 className="text-3xl font-black mb-8 pt-4">Histórico</h1>
 
       <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 mb-8">
-        <div className="flex items-center gap-3 mb-6">
-          <CalendarDays size={20} className="text-indigo-400" />
-          <h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Tempo por Sessão (Últimos 7 dias)</h2>
-        </div>
+        <div className="flex items-center gap-3 mb-6"><CalendarDays size={20} className="text-indigo-400" /><h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Intensidade</h2></div>
         <div className="h-40 w-full min-h-[160px]">
-          <ResponsiveContainer width="100%" height="100%" minHeight={160}>
-            <BarChart data={preciseTimeStats}>
-              <XAxis 
-                dataKey="displayFull" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{fontSize: 8, fill: '#6b7280', fontWeight: 'bold'}} 
-              />
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={stats}>
+              <XAxis dataKey="displayFull" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6b7280', fontWeight: 'bold'}} />
               <YAxis hide />
-              <Tooltip 
-                cursor={{fill: 'rgba(99,102,241,0.05)'}} 
-                content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div className="bg-gray-950 border border-gray-800 p-3 rounded-2xl shadow-2xl">
-                        <p className="text-[10px] font-black text-gray-500 uppercase mb-1">{data.displayDate} às {data.displayTime}</p>
-                        <p className="text-indigo-400 font-black text-sm">{data.duration}</p>
-                        <p className="text-[8px] text-gray-600 mt-1 uppercase font-bold tracking-widest">Tempo Real (HH:MM:SS)</p>
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
-              />
+              <Tooltip cursor={{fill: 'rgba(99,102,241,0.05)'}} content={({ active, payload }) => active && payload?.[0] ? <div className="bg-gray-950 border border-gray-800 p-2 rounded-xl text-[10px] font-black text-indigo-400">{payload[0].payload.duration}</div> : null} />
               <Bar dataKey="seconds" fill="#6366f1" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1074,63 +1148,26 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
       </div>
 
       <div className="space-y-4">
-        {sessions.map(s => (
+        {sessions.length === 0 ? (
+          <div className="text-center py-20 bg-gray-900/20 border border-dashed border-gray-800 rounded-[2rem]">
+            <HistoryIcon size={40} className="text-gray-800 mx-auto mb-4" />
+            <p className="text-gray-500 font-bold">Nenhum treino registrado.</p>
+          </div>
+        ) : sessions.map(s => (
           <div key={s.id} className="bg-gray-900 border border-gray-800 p-6 rounded-[2rem] shadow-sm hover:border-gray-700 transition-all relative">
             <div className="flex justify-between items-start mb-4">
               <div className="flex-1">
                 <p className="font-black text-indigo-400 text-lg">{s.templateName}</p>
-                <div className="flex items-center gap-2 mt-1">
-                   <p className="text-[10px] text-gray-400 font-black uppercase">{new Date(s.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} às {new Date(s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                </div>
+                <p className="text-[10px] text-gray-400 font-black uppercase mt-1">{new Date(s.date).toLocaleDateString()} às {new Date(s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
-              <button 
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (window.confirm("Deseja remover este registro permanentemente?")) {
-                    onDeleteSession(s.id);
-                  }
-                }} 
-                className="relative z-50 text-gray-600 hover:text-red-500 p-4 -mr-4 -mt-4 active:scale-75 transition-all flex items-center justify-center cursor-pointer"
-                style={{ minWidth: '44px', minHeight: '44px' }}
-              >
-                <Trash2 size={22} />
-              </button>
+              <button onClick={() => window.confirm("Excluir este treino do seu histórico?") && onDeleteSession(s.id)} className="text-gray-600 hover:text-red-500 p-2 transition-all active:scale-90"><Trash2 size={20} /></button>
             </div>
-            
-            <div className="grid grid-cols-2 gap-4 mt-2">
-                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50">
-                    <p className="text-[8px] font-black text-gray-600 uppercase mb-1 tracking-widest">Duração Total</p>
-                    <p className="text-sm font-black text-gray-100 tabular-nums">{formatDuration(s.durationMs || 0)}</p>
-                </div>
-                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50">
-                    <p className="text-[8px] font-black text-gray-600 uppercase mb-1 tracking-widest">Exercícios</p>
-                    <p className="text-sm font-black text-gray-100">{s.exercises.length}</p>
-                </div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Volume Estimado</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.reduce((c, d) => c + d.weight, 0), 0)}kg</p></div>
+                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Séries OK</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.filter(s => s.completed).length, 0)}</p></div>
             </div>
-
-            {s.exercises.some(ex => ex.notes) && (
-                <div className="mt-4 space-y-2">
-                    {s.exercises.filter(ex => ex.notes).map((ex, i) => (
-                        <div key={i} className="flex gap-2 items-start bg-gray-950/50 p-3 rounded-xl border border-gray-800/50">
-                            <MessageSquareText size={12} className="text-indigo-500 mt-1 flex-shrink-0" />
-                            <div>
-                                <p className="text-[9px] font-black uppercase text-gray-500 mb-0.5">{ex.name}</p>
-                                <p className="text-xs text-gray-400 leading-relaxed">{ex.notes}</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
           </div>
         ))}
-        {sessions.length === 0 && (
-          <div className="text-center py-20 bg-gray-900/30 rounded-[2rem] border-2 border-dashed border-gray-800/50">
-            <HistoryIcon size={48} className="mx-auto text-gray-800 mb-4 opacity-50" />
-            <p className="text-gray-600 font-bold">Sem treinos registrados nos últimos 7 dias.</p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1138,31 +1175,22 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
 
 const Progress = ({ prs, sessions }: { prs: PersonalRecord[], sessions: WorkoutSession[] }) => {
   const totalTrainingTime = useMemo(() => sessions.reduce((acc, s) => acc + (s.durationMs || 0), 0), [sessions]);
-  
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <h1 className="text-3xl font-black mb-8 pt-4">Evolução</h1>
       <div className="bg-gradient-to-br from-indigo-900/20 to-emerald-900/10 border border-gray-800 rounded-[2rem] p-6 mb-8">
-        <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Tempo Ativo (Última Semana)</p>
-        <p className="text-4xl font-black text-white tabular-nums">{formatDurationFull(totalTrainingTime)}</p>
-        <div className="mt-4 flex gap-4">
-          <div className="bg-gray-950/50 px-3 py-2 rounded-xl border border-gray-800">
-            <p className="text-[8px] font-black text-gray-600 uppercase mb-1">Sessões</p>
-            <p className="text-lg font-black text-emerald-400">{sessions.length}</p>
-          </div>
-          <div className="bg-gray-950/50 px-3 py-2 rounded-xl border border-gray-800">
-            <p className="text-[8px] font-black text-gray-600 uppercase mb-1">Recordes</p>
-            <p className="text-lg font-black text-indigo-400">{prs.length}</p>
-          </div>
-        </div>
+        <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Tempo Total Acumulado</p>
+        <p className="text-4xl font-black text-white">{formatDurationFull(totalTrainingTime)}</p>
       </div>
-      <h2 className="text-lg font-black text-gray-300 mb-4 uppercase tracking-widest text-center">Recordes Pessoais</h2>
+      <h2 className="text-lg font-black text-gray-300 mb-4 uppercase tracking-widest text-center">Melhores Cargas</h2>
       <div className="grid gap-4">
-        {prs.map(pr => (
+        {prs.length === 0 ? (
+          <div className="text-center py-20 text-gray-600">Complete exercícios para ver seus recordes aqui.</div>
+        ) : prs.map(pr => (
           <div key={pr.exerciseId} className="bg-gray-900 border border-gray-800 p-6 rounded-[2rem] flex justify-between items-center shadow-xl">
             <div>
               <h3 className="font-black text-white text-lg">{pr.exerciseName}</h3>
-              <p className="text-xs text-gray-500 font-bold">Atingido em {new Date(pr.date).toLocaleDateString()}</p>
+              <p className="text-xs text-gray-500 font-bold">{new Date(pr.date).toLocaleDateString()}</p>
             </div>
             <div className="text-right">
               <p className="text-3xl font-black text-emerald-400">{pr.weight}<span className="text-xs text-emerald-600 ml-1">kg</span></p>
@@ -1191,14 +1219,8 @@ export default function App() {
     
     let loadedSessions: WorkoutSession[] = [];
     if (s) try { loadedSessions = JSON.parse(s); } catch { }
-    
-    // --- Lógica de Limpeza Automática (Mantém rigorosamente apenas 7 dias) ---
-    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const filteredSessions = loadedSessions.filter(session => {
-        const sessionDate = new Date(session.date).getTime();
-        return (now - sessionDate) <= ONE_WEEK_MS;
-    });
+    // Manter treinos por 30 dias no histórico visível
+    const filteredSessions = loadedSessions.filter(session => (Date.now() - new Date(session.date).getTime()) <= 30 * 24 * 60 * 60 * 1000);
     
     setSessions(filteredSessions);
     if (p) try { setPrs(JSON.parse(p)); } catch { }
@@ -1217,22 +1239,22 @@ export default function App() {
     setSessions(prev => [newSession, ...prev]);
     const updatedPrs = [...prs];
     newSession.exercises.forEach(ex => {
-      const best = ex.sets.filter(s => s.completed).reduce((m, c) => Number(c.weight || 0) > Number(m.weight || 0) ? c : m, { weight: 0, reps: 0, completed: true });
-      if (Number(best.weight) > 0) {
+      const bestSet = ex.sets.reduce((max, set) => set.weight > max.weight ? set : max, { weight: 0, reps: 0, completed: false });
+      if (bestSet.weight > 0) {
         const idx = updatedPrs.findIndex(p => p.exerciseId === ex.exerciseId);
-        if (idx === -1 || Number(best.weight) > updatedPrs[idx].weight) {
-          const newPr = { exerciseId: ex.exerciseId, exerciseName: ex.name, weight: Number(best.weight), reps: Number(best.reps), date: newSession.date };
+        if (idx === -1 || bestSet.weight > updatedPrs[idx].weight) {
+          const newPr = { exerciseId: ex.exerciseId, exerciseName: ex.name, weight: bestSet.weight, reps: bestSet.reps, date: newSession.date };
           if (idx > -1) updatedPrs[idx] = newPr; else updatedPrs.push(newPr);
         }
       }
     });
     setPrs(updatedPrs);
-    showToast("Treino registrado com sucesso!");
+    showToast("Treino finalizado e salvo!");
   };
 
   const deleteSession = (id: string) => {
     setSessions(prev => prev.filter(s => s.id !== id));
-    showToast("Treino removido do histórico.");
+    showToast("Sessão excluída.");
   };
 
   const showToast = (msg: string) => {
@@ -1249,7 +1271,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home prs={prs} sessions={sessions} templates={templates} />} />
             <Route path="/workouts" element={<WorkoutList templates={templates} onUpdateTemplates={setTemplates} exercises={exercises} onUpdateExercises={setExercises} />} />
-            <Route path="/active/:id" element={<ActiveWorkout prs={prs} templates={templates} exercises={exercises} onUpdateExercises={setExercises} onSaveSession={saveSession} />} />
+            <Route path="/active/:id" element={<ActiveWorkout prs={prs} templates={templates} exercises={exercises} onUpdateTemplates={setTemplates} onUpdateExercises={setExercises} onSaveSession={saveSession} />} />
             <Route path="/result/:sessionId" element={<WorkoutResult sessions={sessions} />} />
             <Route path="/history" element={<History sessions={sessions} onDeleteSession={deleteSession} />} />
             <Route path="/progress" element={<Progress prs={prs} sessions={sessions} />} />
