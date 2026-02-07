@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
@@ -27,12 +28,54 @@ import {
   Clock,
   NotebookPen,
   CalendarDays,
-  Heart
+  Heart,
+  Sparkles,
+  Loader2,
+  Lightbulb,
+  MessageSquareQuote,
+  Save
 } from 'lucide-react';
 import { WorkoutSession, PersonalRecord, ActiveExercise, WorkoutSet, WorkoutTemplate, Exercise } from './types';
 import { EXERCISES as DEFAULT_EXERCISES, WORKOUT_TEMPLATES as DEFAULT_TEMPLATES } from './constants';
-import { getMotivationalQuote } from './services/geminiService';
+import { getMotivationalQuote, getExerciseTip } from './services/geminiService';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, YAxis } from 'recharts';
+
+// --- Feedback Helpers ---
+
+const playTickSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+
+    gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.1);
+  } catch (e) {
+    console.debug('Audio feedback not supported or blocked');
+  }
+};
+
+const triggerHaptic = (type: 'light' | 'medium' | 'success' = 'light') => {
+  if (!window.navigator.vibrate) return;
+  
+  if (type === 'light') {
+    window.navigator.vibrate(15);
+  } else if (type === 'medium') {
+    window.navigator.vibrate(30);
+  } else if (type === 'success') {
+    window.navigator.vibrate([40, 30, 40]);
+  }
+};
 
 // --- Utils ---
 
@@ -298,6 +341,8 @@ const RestTimer = ({ exerciseId }: { exerciseId: string }) => {
   );
 };
 
+// --- Home View ---
+
 const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: WorkoutSession[], templates: WorkoutTemplate[] }) => {
   const [quote, setQuote] = useState("A disciplina é o destino.");
   const [activeDuration, setActiveDuration] = useState<string>("00:00:00");
@@ -312,13 +357,11 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
       const elapsedTimeKey = 'titanlift_active_elapsed_time';
       const timerRunningKey = 'titanlift_timer_is_running';
       
-      // Encontrar qual o treino mais recente que está ativo
       const lastActiveTemplate = localStorage.getItem('titanlift_last_active_template');
       const keysInternal = Object.keys(localStorage);
       const activeDraftKeys = keysInternal.filter(k => k.startsWith('titanlift_draft_'));
       
       if (activeDraftKeys.length > 0) {
-        // Prioriza o último que foi aberto, ou o primeiro que encontrar
         const found = activeDraftKeys.find(k => k.includes(lastActiveTemplate || '')) || activeDraftKeys[0];
         setActiveTemplateId(found.replace('titanlift_draft_', ''));
       } else {
@@ -346,6 +389,7 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
     localStorage.setItem('titanlift_active_start_time', Date.now().toString());
     localStorage.setItem('titanlift_timer_is_running', 'true');
     setTimerIsRunning(true);
+    triggerHaptic('light');
   };
 
   const handleTimerPause = () => {
@@ -358,18 +402,17 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
     localStorage.removeItem('titanlift_active_start_time');
     localStorage.setItem('titanlift_timer_is_running', 'false');
     setTimerIsRunning(false);
+    triggerHaptic('light');
   };
 
   const handleTimerReset = () => {
     if (window.confirm("Zerar cronômetro total da sua sessão na academia?")) {
-      // Hard Reset de todas as chaves de tempo
       localStorage.setItem('titanlift_active_elapsed_time', '0');
       localStorage.removeItem('titanlift_active_start_time');
       localStorage.setItem('titanlift_timer_is_running', 'false');
-      
-      // Update UI state immediately
       setTimerIsRunning(false);
       setActiveDuration("00:00:00");
+      triggerHaptic('medium');
     }
   };
 
@@ -579,16 +622,18 @@ const WorkoutList = ({
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <div className="flex justify-between items-center mb-8 pt-4">
         <h1 className="text-3xl font-black">Planos de Treino</h1>
-        <button 
-          onClick={() => {
-            setIsManageMode(!isManageMode);
-            setEditingTemplateId(null);
-            setEditingExerciseId(null);
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-        >
-          <Settings2 size={18} /> {isManageMode ? "Finalizar" : "Gerenciar"}
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => {
+              setIsManageMode(!isManageMode);
+              setEditingTemplateId(null);
+              setEditingExerciseId(null);
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+          >
+            <Settings2 size={18} /> {isManageMode ? "Finalizar" : "Gerenciar"}
+          </button>
+        </div>
       </div>
 
       {isManageMode && (
@@ -742,6 +787,8 @@ const ActiveWorkout = ({
   const [activeDuration, setActiveDuration] = useState("00:00:00");
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
   const [focusedExerciseIdx, setFocusedExerciseIdx] = useState<number | null>(null);
+  const [focusedSetKey, setFocusedSetKey] = useState<string | null>(null);
+  const [aiTips, setAiTips] = useState<Record<number, { text: string; loading: boolean }>>({});
 
   useEffect(() => {
     localStorage.setItem('titanlift_last_active_template', templateId || '');
@@ -791,6 +838,13 @@ const ActiveWorkout = ({
   const totalSets = useMemo(() => activeExercises.reduce((acc, ex) => acc + ex.sets.length, 0), [activeExercises]);
   const overallProgress = totalSets > 0 ? (totalCompletedSets / totalSets) * 100 : 0;
 
+  const handleAiTip = async (exIdx: number, exerciseName: string) => {
+    setAiTips(prev => ({ ...prev, [exIdx]: { text: prev[exIdx]?.text || '', loading: true } }));
+    triggerHaptic('light');
+    const tip = await getExerciseTip(exerciseName);
+    setAiTips(prev => ({ ...prev, [exIdx]: { text: tip, loading: false } }));
+  };
+
   const persistExerciseConfig = (exerciseIdx: number) => {
     const ex = activeExercises[exerciseIdx];
     const memoryKey = `titanlift_config_v2_${ex.exerciseId}`;
@@ -810,9 +864,14 @@ const ActiveWorkout = ({
       const exId = updated[exerciseIndex].exerciseId;
       window.dispatchEvent(new CustomEvent('titanlift_start_rest', { detail: { exerciseId: exId } }));
       localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
+      
+      // Feedbacks
+      triggerHaptic('medium');
+      playTickSound();
+    } else if (field === 'completed' && value === false) {
+      triggerHaptic('light');
     }
 
-    // Salvamento individual para evitar perda de dados
     persistExerciseConfig(exerciseIndex);
     setActiveExercises(updated);
   };
@@ -857,6 +916,7 @@ const ActiveWorkout = ({
       onUpdateTemplates(updatedTemplates);
     }
     setShowAddExerciseList(false);
+    triggerHaptic('light');
   };
 
   const handleCreateNewExercise = () => {
@@ -873,7 +933,6 @@ const ActiveWorkout = ({
   };
 
   const handleFinish = () => {
-    // Calculamos o tempo gasto ATÉ O MOMENTO (baseado na diferença se o timer estiver rodando)
     const isRunning = localStorage.getItem(TIMER_RUNNING_KEY) === 'true';
     const elapsedBase = parseInt(localStorage.getItem('titanlift_active_elapsed_time') || '0');
     let finalMs = elapsedBase;
@@ -893,12 +952,11 @@ const ActiveWorkout = ({
     
     onSaveSession(session);
     
-    // IMPORTANTE: Limpamos apenas o rascunho DESTE treino
-    // O cronômetro "Tempo de Academia" na Home CONTINUA contando, pois ele é global da sessão.
     localStorage.removeItem(DRAFT_KEY);
     localStorage.removeItem(LAST_ACTIVE_IDX_KEY);
     localStorage.removeItem('titanlift_last_active_template');
     
+    triggerHaptic('success');
     navigate(`/result/${session.id}`);
   };
 
@@ -936,6 +994,8 @@ const ActiveWorkout = ({
       <div className="space-y-4">
         {activeExercises.map((ex, exIdx) => {
           const isFocused = focusedExerciseIdx === exIdx;
+          const tipData = aiTips[exIdx];
+
           return (
             <div 
               key={exIdx} 
@@ -970,22 +1030,41 @@ const ActiveWorkout = ({
                   ) : (
                     <div className="flex items-center gap-2">
                       <h2 className={`text-lg font-black transition-colors ${isFocused ? 'text-indigo-400' : 'text-gray-100'}`}>{ex.name}</h2>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx); }} 
-                        className={`p-2 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
-                      >
-                        <NotebookPen size={18} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx); triggerHaptic('light'); }} 
+                          className={`p-2 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
+                          title="Anotações"
+                        >
+                          <NotebookPen size={18} />
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleAiTip(exIdx, ex.name); }} 
+                          className={`p-2 rounded-lg transition-all ${tipData?.text ? 'text-amber-400 bg-amber-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
+                          title="Dica IA"
+                        >
+                          {tipData?.loading ? <Loader2 size={18} className="animate-spin text-indigo-400" /> : <Sparkles size={18} />}
+                        </button>
+                      </div>
                       {isManageMode && <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={14} /></button>}
                     </div>
                   )}
                 </div>
                 {isManageMode && (
-                  <button onClick={() => { if (confirm("Remover este exercício do treino atual?")) { const updated = [...activeExercises]; updated.splice(exIdx, 1); setActiveExercises(updated); } }} className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 ml-2 transition-all active:scale-90">
+                  <button onClick={() => { if (confirm("Remover este exercício do treino atual?")) { const updated = [...activeExercises]; updated.splice(exIdx, 1); setActiveExercises(updated); triggerHaptic('medium'); } }} className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 ml-2 transition-all active:scale-90">
                     <Trash2 size={16} />
                   </button>
                 )}
               </div>
+
+              {tipData?.text && (
+                <div className="mb-4 animate-in slide-in-from-top-2 duration-300">
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 flex gap-3">
+                    <Lightbulb size={18} className="text-amber-400 shrink-0" />
+                    <p className="text-[11px] leading-relaxed text-gray-300 font-medium italic">"{tipData.text}"</p>
+                  </div>
+                </div>
+              )}
 
               {editingNoteIndex === exIdx && (
                 <textarea 
@@ -1002,40 +1081,49 @@ const ActiveWorkout = ({
                 <div className="grid gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] text-[9px] font-black text-gray-600 px-2 uppercase text-center items-center mb-1">
                   <span>Série</span><span>Peso (kg)</span><span>Reps</span><span>OK</span><span />
                 </div>
-                {ex.sets.map((set, setIdx) => (
-                  <div key={setIdx} className="grid items-center gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem]">
-                    <span className="text-xs font-black text-gray-600 text-center">{setIdx + 1}</span>
-                    <div className="relative">
-                      <input 
-                        type="number" inputMode="decimal" 
-                        className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] outline-none focus:ring-2 focus:ring-indigo-500 transition-all" 
-                        value={set.weight === 0 ? '' : set.weight} 
-                        placeholder="0" 
-                        onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value === '' ? 0 : Number(e.target.value))} 
-                      />
-                      <button onClick={() => setPlateWeight(Number(set.weight))} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={14}/></button>
-                    </div>
-                    <select 
-                      className="w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] appearance-none outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer" 
-                      value={set.reps || 10} 
-                      onChange={(e) => updateSet(exIdx, setIdx, 'reps', Number(e.target.value))}
+                {ex.sets.map((set, setIdx) => {
+                  const sKey = `${exIdx}-${setIdx}`;
+                  const isSetFocused = focusedSetKey === sKey;
+                  return (
+                    <div 
+                      key={setIdx} 
+                      className={`grid items-center gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] p-1 rounded-xl transition-all duration-300 border ${set.completed ? 'bg-gray-950/50 border-emerald-500/30 opacity-60' : 'border-transparent'} ${isSetFocused ? 'ring-1 ring-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.15)] bg-gray-800/40' : ''}`}
+                      onFocus={() => setFocusedSetKey(sKey)}
+                      onBlur={() => setFocusedSetKey(null)}
                     >
-                      {Array.from({ length: 30 }, (_, i) => i + 1).map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                    <button 
-                      className={`h-11 w-full rounded-xl flex items-center justify-center transition-all ${set.completed ? 'bg-emerald-600 text-white shadow-emerald-600/20' : 'bg-gray-800 text-gray-600'}`} 
-                      onClick={() => updateSet(exIdx, setIdx, 'completed', !set.completed)}
-                    ><CheckCircle2 size={20} /></button>
-                    <button 
-                      onClick={() => { const updated = [...activeExercises]; updated[exIdx].sets.splice(setIdx, 1); setActiveExercises(updated); persistExerciseConfig(exIdx); }} 
-                      disabled={ex.sets.length <= 1} 
-                      className="text-gray-700 hover:text-red-500 p-2 disabled:opacity-0 transition-all"
-                    ><Trash2 size={16}/></button>
-                  </div>
-                ))}
+                      <span className={`text-xs font-black transition-colors text-center ${set.completed ? 'text-gray-700' : 'text-gray-600'}`}>{setIdx + 1}</span>
+                      <div className="relative">
+                        <input 
+                          type="number" inputMode="decimal" 
+                          className={`w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${set.completed ? 'text-gray-500 bg-gray-900' : ''}`} 
+                          value={set.weight === 0 ? '' : set.weight} 
+                          placeholder="0" 
+                          onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value === '' ? 0 : Number(e.target.value))} 
+                        />
+                        <button onClick={() => { setPlateWeight(Number(set.weight)); triggerHaptic('light'); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={14}/></button>
+                      </div>
+                      <select 
+                        className={`w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] appearance-none outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer ${set.completed ? 'text-gray-500 bg-gray-900' : ''}`} 
+                        value={set.reps || 10} 
+                        onChange={(e) => updateSet(exIdx, setIdx, 'reps', Number(e.target.value))}
+                      >
+                        {Array.from({ length: 30 }, (_, i) => i + 1).map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                      <button 
+                        className={`h-11 w-full rounded-xl flex items-center justify-center transition-all ${set.completed ? 'bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-gray-800 text-gray-600'}`} 
+                        onClick={() => updateSet(exIdx, setIdx, 'completed', !set.completed)}
+                      ><CheckCircle2 size={20} /></button>
+                      <button 
+                        onClick={() => { const updated = [...activeExercises]; updated[exIdx].sets.splice(setIdx, 1); setActiveExercises(updated); persistExerciseConfig(exIdx); triggerHaptic('medium'); }} 
+                        disabled={ex.sets.length <= 1} 
+                        className="text-gray-700 hover:text-red-500 p-2 disabled:opacity-0 transition-all"
+                      ><Trash2 size={16}/></button>
+                    </div>
+                  );
+                })}
               </div>
               <button 
-                onClick={() => { const updated = [...activeExercises]; const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1]; updated[exIdx].sets.push({...lastSet, completed: false}); setActiveExercises(updated); persistExerciseConfig(exIdx); }} 
+                onClick={() => { const updated = [...activeExercises]; const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1]; updated[exIdx].sets.push({...lastSet, completed: false}); setActiveExercises(updated); persistExerciseConfig(exIdx); triggerHaptic('light'); }} 
                 className="w-full border border-dashed border-gray-800 text-gray-500 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800/50 transition-all active:scale-95"
               >
                 <Plus size={14} className="inline mr-1"/> Nova Série
@@ -1078,12 +1166,21 @@ const ActiveWorkout = ({
   );
 };
 
-const WorkoutResult = ({ sessions }: { sessions: WorkoutSession[] }) => {
+const WorkoutResult = ({ sessions, onUpdateNotes }: { sessions: WorkoutSession[], onUpdateNotes: (sessionId: string, notes: string) => void }) => {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const session = sessions.find(s => s.id === sessionId);
+  const [note, setNote] = useState(session?.generalNotes || "");
+  const [isSaved, setIsSaved] = useState(false);
 
   if (!session) return <div className="p-10 text-center text-gray-500">Sessão não encontrada</div>;
+
+  const handleSaveNote = () => {
+    onUpdateNotes(session.id, note);
+    setIsSaved(true);
+    triggerHaptic('light');
+    setTimeout(() => setIsSaved(false), 2000);
+  };
 
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
@@ -1099,6 +1196,27 @@ const WorkoutResult = ({ sessions }: { sessions: WorkoutSession[] }) => {
             <p className="text-xs text-gray-500 mt-2 font-bold">{new Date(session.date).toLocaleDateString()} às {new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
         
+        <div className="mb-8 pt-4 border-t border-gray-800">
+          <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4 flex items-center gap-2">
+            <NotebookPen size={12} className="text-indigo-400" /> Como foi o treino?
+          </h3>
+          <div className="relative">
+            <textarea 
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Ex: Treino rendeu muito, foquei em amplitude no agachamento..."
+              className="w-full bg-gray-950 border border-gray-800 rounded-2xl p-4 text-sm text-gray-300 h-32 outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+            />
+            <button 
+              onClick={handleSaveNote}
+              className={`absolute bottom-3 right-3 p-2 rounded-xl flex items-center gap-2 transition-all ${isSaved ? 'bg-emerald-600 text-white' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/30'}`}
+            >
+              {isSaved ? <Check size={16} /> : <Save size={16} />}
+              <span className="text-[10px] font-black uppercase tracking-widest">{isSaved ? 'Salvo' : 'Salvar Nota'}</span>
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-4 mb-8">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 border-b border-gray-800 pb-2">Exercícios Realizados</h3>
             {session.exercises.map((ex, i) => (
@@ -1136,11 +1254,16 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
       <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 mb-8">
         <div className="flex items-center gap-3 mb-6"><CalendarDays size={20} className="text-indigo-400" /><h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Intensidade</h2></div>
         <div className="h-40 w-full min-h-[160px]">
+          {/* Fix: use double quotes and check payload length in Tooltip content */}
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={stats}>
               <XAxis dataKey="displayFull" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6b7280', fontWeight: 'bold'}} />
               <YAxis hide />
-              <Tooltip cursor={{fill: 'rgba(99,102,241,0.05)'}} content={({ active, payload }) => active && payload?.[0] ? <div className="bg-gray-950 border border-gray-800 p-2 rounded-xl text-[10px] font-black text-indigo-400">{payload[0].payload.duration}</div> : null} />
+              <Tooltip cursor={{fill: 'rgba(99,102,241,0.05)'}} content={({ active, payload }) => active && payload && payload.length > 0 ? (
+                <div className="bg-gray-950 border border-gray-800 p-2 rounded-xl text-[10px] font-black text-indigo-400">
+                  {payload[0].payload.duration}
+                </div>
+              ) : null} />
               <Bar dataKey="seconds" fill="#6366f1" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1160,8 +1283,16 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
                 <p className="font-black text-indigo-400 text-lg">{s.templateName}</p>
                 <p className="text-[10px] text-gray-400 font-black uppercase mt-1">{new Date(s.date).toLocaleDateString()} às {new Date(s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
-              <button onClick={() => window.confirm("Excluir este treino do seu histórico?") && onDeleteSession(s.id)} className="text-gray-600 hover:text-red-500 p-2 transition-all active:scale-90"><Trash2 size={20} /></button>
+              <button onClick={() => { if (window.confirm("Excluir este treino do seu histórico?")) { onDeleteSession(s.id); triggerHaptic('medium'); } }} className="text-gray-600 hover:text-red-500 p-2 transition-all active:scale-90"><Trash2 size={20} /></button>
             </div>
+            
+            {s.generalNotes && (
+              <div className="mb-4 bg-gray-950/50 p-3 rounded-2xl border border-gray-800 flex gap-3 items-start">
+                <MessageSquareQuote size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-400 italic line-clamp-2">{s.generalNotes}</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
                 <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Volume Estimado</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.reduce((c, d) => c + d.weight, 0), 0)}kg</p></div>
                 <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Séries OK</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.filter(s => s.completed).length, 0)}</p></div>
@@ -1219,7 +1350,6 @@ export default function App() {
     
     let loadedSessions: WorkoutSession[] = [];
     if (s) try { loadedSessions = JSON.parse(s); } catch { }
-    // Manter treinos por 30 dias no histórico visível
     const filteredSessions = loadedSessions.filter(session => (Date.now() - new Date(session.date).getTime()) <= 30 * 24 * 60 * 60 * 1000);
     
     setSessions(filteredSessions);
@@ -1252,6 +1382,10 @@ export default function App() {
     showToast("Treino finalizado e salvo!");
   };
 
+  const updateSessionNotes = (sessionId: string, notes: string) => {
+    setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, generalNotes: notes } : s));
+  };
+
   const deleteSession = (id: string) => {
     setSessions(prev => prev.filter(s => s.id !== id));
     showToast("Sessão excluída.");
@@ -1272,7 +1406,7 @@ export default function App() {
             <Route path="/" element={<Home prs={prs} sessions={sessions} templates={templates} />} />
             <Route path="/workouts" element={<WorkoutList templates={templates} onUpdateTemplates={setTemplates} exercises={exercises} onUpdateExercises={setExercises} />} />
             <Route path="/active/:id" element={<ActiveWorkout prs={prs} templates={templates} exercises={exercises} onUpdateTemplates={setTemplates} onUpdateExercises={setExercises} onSaveSession={saveSession} />} />
-            <Route path="/result/:sessionId" element={<WorkoutResult sessions={sessions} />} />
+            <Route path="/result/:sessionId" element={<WorkoutResult sessions={sessions} onUpdateNotes={updateSessionNotes} />} />
             <Route path="/history" element={<History sessions={sessions} onDeleteSession={deleteSession} />} />
             <Route path="/progress" element={<Progress prs={prs} sessions={sessions} />} />
           </Routes>
