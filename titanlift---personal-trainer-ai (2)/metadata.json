@@ -1,0 +1,7 @@
+{
+  "name": "TitanLift - Personal Trainer AI",
+  "description": "A high-performance workout tracking app with pre-defined routines, PR tracking, and AI-powered exercise insights.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
