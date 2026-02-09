@@ -33,11 +33,16 @@ import {
   Loader2,
   Lightbulb,
   MessageSquareQuote,
-  Save
+  Save,
+  CloudCheck,
+  Camera,
+  Scan as ScanIcon,
+  Image as ImageIcon,
+  FileSearch
 } from 'lucide-react';
-import { WorkoutSession, PersonalRecord, ActiveExercise, WorkoutSet, WorkoutTemplate, Exercise } from './types';
-import { EXERCISES as DEFAULT_EXERCISES, WORKOUT_TEMPLATES as DEFAULT_TEMPLATES } from './constants';
-import { getMotivationalQuote, getExerciseTip } from './services/geminiService';
+import { WorkoutSession, PersonalRecord, ActiveExercise, WorkoutSet, WorkoutTemplate, Exercise } from './types.ts';
+import { EXERCISES as DEFAULT_EXERCISES, WORKOUT_TEMPLATES as DEFAULT_TEMPLATES } from './constants.tsx';
+import { getMotivationalQuote, getExerciseTip, AiTipResponse, scanWorkoutFromImage } from './services/geminiService.ts';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, YAxis } from 'recharts';
 
 // --- Feedback Helpers ---
@@ -108,7 +113,7 @@ const formatDurationFull = (ms: number) => {
 
 const Toast = ({ message, visible }: { message: string, visible: boolean }) => (
   <div className={`fixed bottom-28 left-1/2 -translate-x-1/2 z-[200] transition-all duration-300 transform ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-    <div className="bg-gray-800 text-white px-6 py-3 rounded-2xl shadow-2xl border border-gray-700 font-medium text-sm whitespace-nowrap">
+    <div className="bg-gray-800 text-white px-5 py-2 rounded-2xl shadow-2xl border border-gray-700 font-medium text-xs whitespace-nowrap">
       {message}
     </div>
   </div>
@@ -116,24 +121,24 @@ const Toast = ({ message, visible }: { message: string, visible: boolean }) => (
 
 const ExitConfirmDialog = ({ onCancel, onConfirm }: { onCancel: () => void, onConfirm: () => void }) => (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6">
-    <div className="bg-gray-900 border border-gray-800 w-full max-sm rounded-[32px] p-8 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
-      <div className="bg-indigo-500/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-        <Dumbbell size={32} className="text-indigo-500" />
+    <div className="bg-gray-900 border border-gray-800 w-full max-sm rounded-[32px] p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+      <div className="bg-indigo-500/10 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5">
+        <Dumbbell size={28} className="text-indigo-500" />
       </div>
-      <h2 className="text-xl font-black text-white mb-3">Sair para o Início?</h2>
-      <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+      <h2 className="text-lg font-black text-white mb-2">Sair para o Início?</h2>
+      <p className="text-gray-400 text-xs mb-6 leading-relaxed">
         Seu progresso atual fica salvo. O tempo total da academia continua contando.
       </p>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2.5">
         <button 
           onClick={onConfirm}
-          className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98]"
+          className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98]"
         >
           Sair do Treino Atual
         </button>
         <button 
           onClick={onCancel}
-          className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98]"
+          className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98]"
         >
           Continuar Malhando
         </button>
@@ -163,40 +168,41 @@ const PlateCalculator = ({ weight, onClose }: { weight: number, onClose: () => v
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-6">
-      <div className="bg-gray-900 border border-gray-800 w-full max-w-xs rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-black text-indigo-400 uppercase text-xs tracking-widest">Anilhas (por lado)</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20}/></button>
+      <div className="bg-gray-900 border border-gray-800 w-full max-w-xs rounded-3xl p-5 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="font-black text-indigo-400 uppercase text-[10px] tracking-widest">Anilhas (por lado)</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={18}/></button>
         </div>
-        <div className="text-center mb-6">
-          <p className="text-4xl font-black text-white">{weight} <span className="text-sm text-gray-500">kg</span></p>
-          <p className="text-[10px] text-gray-500 uppercase mt-1">Total com Barra de 20kg</p>
+        <div className="text-center mb-5">
+          <p className="text-3xl font-black text-white">{weight} <span className="text-xs text-gray-500">kg</span></p>
+          <p className="text-[9px] text-gray-500 uppercase mt-1">Total com Barra de 20kg</p>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {plates.length > 0 ? (
-            <div className="flex flex-wrap gap-2 justify-center">
+            <div className="flex flex-wrap gap-1.5 justify-center">
               {plates.map((p, i) => (
-                <div key={i} className="bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 px-3 py-1 rounded-lg text-xs font-black">
+                <div key={i} className="bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 px-2.5 py-1 rounded-lg text-[10px] font-black">
                   {p}kg
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-xs text-center text-gray-600 italic">Peso apenas da barra.</p>
+            <p className="text-[10px] text-center text-gray-600 italic">Peso apenas da barra.</p>
           )}
         </div>
-        <button onClick={onClose} className="w-full mt-8 bg-gray-800 py-3 rounded-xl font-bold text-sm">Fechar</button>
+        <button onClick={onClose} className="w-full mt-6 bg-gray-800 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider">Fechar</button>
       </div>
     </div>
   );
 };
 
 const Navbar = () => (
-  <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex justify-between items-center z-50 md:top-0 md:bottom-auto md:flex-col md:w-20 md:h-screen md:border-r md:border-t-0">
-    <Link to="/" className="p-2 text-indigo-500 hover:text-indigo-400"><LayoutDashboard size={24} /></Link>
-    <Link to="/workouts" className="p-2 text-gray-400 hover:text-indigo-400"><Dumbbell size={24} /></Link>
-    <Link to="/progress" className="p-2 text-gray-400 hover:text-indigo-400"><TrendingUp size={24} /></Link>
-    <Link to="/history" className="p-2 text-gray-400 hover:text-indigo-400"><HistoryIcon size={24} /></Link>
+  <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 px-6 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex justify-between items-center z-50 md:top-0 md:bottom-auto md:flex-col md:w-20 md:h-screen md:border-r md:border-t-0">
+    <Link to="/" className="p-2 text-indigo-500 hover:text-indigo-400"><LayoutDashboard size={22} /></Link>
+    <Link to="/workouts" className="p-2 text-gray-400 hover:text-indigo-400"><Dumbbell size={22} /></Link>
+    <Link to="/scan" className="p-2 text-gray-400 hover:text-indigo-400"><ScanIcon size={22} /></Link>
+    <Link to="/progress" className="p-2 text-gray-400 hover:text-indigo-400"><TrendingUp size={22} /></Link>
+    <Link to="/history" className="p-2 text-gray-400 hover:text-indigo-400"><HistoryIcon size={22} /></Link>
   </nav>
 );
 
@@ -288,51 +294,51 @@ const RestTimer = ({ exerciseId }: { exerciseId: string }) => {
   };
 
   return (
-    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-1.5 px-3 flex items-center justify-start gap-3">
+    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-1 px-2.5 flex items-center justify-start gap-2.5">
       <div className="flex items-center gap-1.5">
-        <Timer size={12} className="text-indigo-400" />
-        <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Descanso</span>
+        <Timer size={11} className="text-indigo-400" />
+        <span className="text-[7px] font-black text-gray-500 uppercase tracking-widest">Descanso</span>
       </div>
       
       <div className="flex items-center gap-2">
         {timeLeft > 0 ? (
-          <div className="flex items-center gap-2">
-            <span className={`text-sm font-black tabular-nums tracking-[0.1em] px-2 py-0.5 bg-gray-950/50 rounded-lg border border-gray-800/50 ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-indigo-400'}`}>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[13px] font-black tabular-nums tracking-[0.1em] px-1.5 py-0.5 bg-gray-950/50 rounded-lg border border-gray-800/50 ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-indigo-400'}`}>
               {formatTime(timeLeft)}
             </span>
-            <div className="flex gap-1">
-              <button onClick={togglePause} className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded-lg hover:bg-indigo-600/30 active:scale-90 transition-all border border-indigo-500/20">
-                {isActive ? <Pause size={12} /> : <Play size={12} fill="currentColor" />}
+            <div className="flex gap-0.5">
+              <button onClick={togglePause} className="p-1 bg-indigo-600/20 text-indigo-400 rounded-lg hover:bg-indigo-600/30 active:scale-90 transition-all border border-indigo-500/20">
+                {isActive ? <Pause size={10} /> : <Play size={10} fill="currentColor" />}
               </button>
-              <button onClick={resetTimer} className="p-1.5 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 active:scale-90 transition-all border border-gray-600">
-                <RotateCcw size={12} />
+              <button onClick={resetTimer} className="p-1 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 active:scale-90 transition-all border border-gray-600">
+                <RotateCcw size={10} />
               </button>
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-0.5">
               <input 
                 type="number" 
                 value={minInput === 0 ? '' : minInput}
                 placeholder="0"
                 onChange={(e) => setMinInput(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                className="bg-gray-900 border border-gray-700 w-10 text-center rounded-lg py-1 text-[16px] font-black text-white outline-none focus:ring-1 focus:ring-indigo-500"
+                className="bg-gray-900 border border-gray-700 w-8 text-center rounded-lg py-0.5 text-[14px] font-black text-white outline-none focus:ring-1 focus:ring-indigo-500"
               />
-              <span className="text-gray-700 font-black text-xs">:</span>
+              <span className="text-gray-700 font-black text-[10px]">:</span>
               <input 
                 type="number" 
                 value={secInput === 0 ? '' : secInput}
                 placeholder="0"
                 onChange={(e) => setSecInput(e.target.value === '' ? 0 : Math.min(59, Math.max(0, Number(e.target.value))))}
-                className="bg-gray-900 border border-gray-700 w-10 text-center rounded-lg py-1 text-[16px] font-black text-white outline-none focus:ring-1 focus:ring-indigo-500"
+                className="bg-gray-900 border border-gray-700 w-8 text-center rounded-lg py-0.5 text-[14px] font-black text-white outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <button 
               onClick={startTimer}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white p-1.5 rounded-lg shadow-lg active:scale-90 transition-all"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white p-1 rounded-lg shadow-lg active:scale-90 transition-all"
             >
-              <Play size={14} fill="currentColor" />
+              <Play size={11} fill="currentColor" />
             </button>
           </div>
         )}
@@ -406,7 +412,7 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
   };
 
   const handleTimerReset = () => {
-    if (window.confirm("Zerar cronômetro total da sua sessão na academia?")) {
+    if (window.confirm("Zerar cronômetro total?")) {
       localStorage.setItem('titanlift_active_elapsed_time', '0');
       localStorage.removeItem('titanlift_active_start_time');
       localStorage.setItem('titanlift_timer_is_running', 'false');
@@ -440,61 +446,59 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
         <p className="text-gray-400 italic text-sm">"{quote}"</p>
       </header>
 
-      <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-5 mb-6">
-        <div className="flex justify-between items-center mb-4">
+      <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-4 mb-6">
+        <div className="flex justify-between items-center mb-3 px-1">
           <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500">Sua Semana</h2>
-          <span className="text-[10px] font-bold text-indigo-400">Freq. Semanal</span>
         </div>
-        <div className="flex justify-between items-center px-2">
+        <div className="flex justify-between items-center px-1">
           {weekDaysStatus.map((day, i) => (
-            <div key={i} className="flex flex-col items-center gap-2">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black transition-all duration-500 ${day.active ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)]' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
-                {day.active ? <CheckCircle2 size={16} /> : day.label}
+            <div key={i} className="flex flex-col items-center gap-1.5">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-500 ${day.active ? 'bg-indigo-600 text-white shadow-[0_0_10px_rgba(99,102,241,0.4)]' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                {day.active ? <CheckCircle2 size={14} /> : day.label}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className={`border rounded-[2.5rem] p-8 mb-10 transition-all duration-500 ${activeTemplateId ? 'bg-gradient-to-br from-indigo-900/30 to-indigo-950/50 border-indigo-500/30 shadow-[0_0_40px_rgba(99,102,241,0.1)]' : 'bg-gray-900 border-gray-800'}`}>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <Clock size={20} className={timerIsRunning ? 'text-indigo-400 animate-pulse' : 'text-gray-500'} />
-            <h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Tempo de Academia</h2>
+      <div className={`border rounded-[2rem] p-6 mb-10 transition-all duration-500 ${activeTemplateId ? 'bg-gradient-to-br from-indigo-900/30 to-indigo-950/50 border-indigo-500/30' : 'bg-gray-900 border-gray-800'}`}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2.5">
+            <Clock size={18} className={timerIsRunning ? 'text-indigo-400 animate-pulse' : 'text-gray-500'} />
+            <h2 className="text-[11px] font-black uppercase tracking-widest text-gray-300">Tempo Total</h2>
           </div>
           {activeTemplateId && (
-            <Link to={`/active/${activeTemplateId}?resume=true`} className="text-[10px] font-black uppercase bg-indigo-600/20 px-3 py-1 rounded-full text-indigo-400 border border-indigo-500/30 animate-pulse">Retomar Treino</Link>
+            <Link to={`/active/${activeTemplateId}?resume=true`} className="text-[9px] font-black uppercase bg-indigo-600/20 px-2.5 py-0.5 rounded-full text-indigo-400 border border-indigo-500/20">Retomar</Link>
           )}
         </div>
         
-        <div className="text-center py-4">
-          <span className={`text-6xl font-black tabular-nums tracking-tighter ${activeDuration !== '00:00:00' ? 'text-white' : 'text-gray-700'}`}>
+        <div className="text-center py-2">
+          <span className={`text-5xl font-black tabular-nums tracking-tighter ${activeDuration !== '00:00:00' ? 'text-white' : 'text-gray-700'}`}>
             {activeDuration}
           </span>
           
-          <div className="flex items-center justify-center gap-4 mt-8 bg-gray-950/40 p-3 rounded-[2rem] border border-gray-800/50 max-w-[280px] mx-auto overflow-hidden">
+          <div className="flex items-center justify-center gap-3 mt-6 bg-gray-950/40 p-2 rounded-[1.5rem] border border-gray-800/50 max-w-[240px] mx-auto overflow-hidden">
             <button 
               onClick={handleTimerReset}
-              title="Resetar Cronômetro"
-              className="p-3.5 bg-gray-800 text-gray-400 rounded-2xl border border-gray-700 active:scale-90 transition-all hover:bg-gray-700 hover:text-red-400"
+              className="p-2.5 bg-gray-800 text-gray-400 rounded-xl border border-gray-700 active:scale-90 transition-all hover:text-red-400"
             >
-              <RotateCcw size={18} />
+              <RotateCcw size={15} />
             </button>
             
             <div className="flex items-center gap-2 flex-1">
               {timerIsRunning ? (
                 <button 
                   onClick={handleTimerPause}
-                  className="flex-1 p-3.5 rounded-2xl border transition-all active:scale-90 flex items-center justify-center bg-amber-500/10 border-amber-500/40 text-amber-500"
+                  className="flex-1 py-2.5 rounded-xl border transition-all active:scale-90 flex items-center justify-center bg-amber-500/10 border-amber-500/40 text-amber-500"
                 >
-                  <Pause size={20} fill="currentColor" />
+                  <Pause size={18} fill="currentColor" />
                 </button>
               ) : (
                 <button 
                   onClick={handleTimerStart}
-                  className="flex-1 p-3.5 rounded-2xl border transition-all active:scale-90 flex items-center justify-center bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/20"
+                  className="flex-1 py-2.5 rounded-xl border transition-all active:scale-90 flex items-center justify-center bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/20"
                 >
-                  <Play size={20} fill="currentColor" />
+                  <Play size={18} fill="currentColor" />
                 </button>
               )}
             </div>
@@ -502,57 +506,205 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
         </div>
       </div>
 
-      <section className="mb-10">
-        <div className="flex justify-between items-end mb-6">
-          <h2 className="text-xl font-bold text-gray-100">Planos</h2>
-          <Link to="/workouts" className="text-indigo-400 text-sm font-medium flex items-center gap-1 hover:underline">
-            Ver Todos <ArrowRight size={14} />
+      <section className="mb-8">
+        <div className="flex justify-between items-end mb-4">
+          <h2 className="text-lg font-bold text-gray-100">Planos</h2>
+          <Link to="/workouts" className="text-indigo-400 text-xs font-medium flex items-center gap-1 hover:underline">
+            Ver Todos <ArrowRight size={12} />
           </Link>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           {templates.slice(0, 4).map(template => (
             <Link 
               key={template.id} 
               to={`/active/${template.id}`}
-              className="bg-gray-900 border border-gray-800 p-6 rounded-3xl hover:border-indigo-500/50 hover:bg-gray-900/40 transition-all group relative overflow-hidden"
+              className="bg-gray-900 border border-gray-800 p-5 rounded-3xl hover:border-indigo-500/50 hover:bg-gray-900/40 transition-all group relative overflow-hidden"
             >
               <div className="relative z-10">
-                <h3 className="text-xl font-bold text-gray-100 group-hover:text-indigo-400 mb-1">{template.name}</h3>
-                <p className="text-gray-500 text-xs mb-4 line-clamp-1">{template.description}</p>
-                <div className="flex items-center text-indigo-500 font-bold text-sm">
-                  Iniciar <Play size={14} className="ml-1 fill-current" />
+                <h3 className="text-base font-bold text-gray-100 group-hover:text-indigo-400 mb-0.5">{template.name}</h3>
+                <p className="text-gray-500 text-[10px] mb-3 line-clamp-1">{template.description}</p>
+                <div className="flex items-center text-indigo-500 font-bold text-[10px] uppercase tracking-wider">
+                  Iniciar <Play size={10} className="ml-1 fill-current" />
                 </div>
               </div>
-              <Dumbbell className="absolute -right-4 -bottom-4 text-gray-800/10 group-hover:text-indigo-500/10 transition-colors" size={100} />
+              <Dumbbell className="absolute -right-3 -bottom-3 text-gray-800/10 group-hover:text-indigo-500/10 transition-colors" size={70} />
             </Link>
           ))}
         </div>
       </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Link to="/history" className="bg-gray-900 border border-gray-800 p-6 rounded-3xl flex items-center justify-between group hover:bg-gray-800 transition-all">
-          <div className="flex items-center gap-4">
-            <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-600/20"><HistoryIcon size={24} className="text-white" /></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Link to="/scan" className="bg-gray-900 border border-gray-800 p-4 rounded-3xl flex items-center justify-between group hover:bg-gray-800 transition-all">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-600 p-2 rounded-xl shadow-lg shadow-emerald-600/20"><ScanIcon size={18} className="text-white" /></div>
             <div>
-              <h3 className="font-bold text-lg">Histórico</h3>
-              <p className="text-gray-500 text-xs">Últimas sessões</p>
+              <h3 className="font-bold text-sm">Scan de Foto</h3>
+              <p className="text-gray-500 text-[10px]">Ler print de treino</p>
             </div>
           </div>
-          <ChevronRight className="text-indigo-500 group-hover:translate-x-1 transition-transform" />
+          <ChevronRight size={16} className="text-emerald-500" />
         </Link>
-
-        <Link to="/progress" className="bg-gray-900 border border-gray-800 p-6 rounded-3xl flex items-center justify-between group hover:bg-gray-800 transition-all">
-          <div className="flex items-center gap-4">
-            <div className="bg-emerald-600 p-3 rounded-2xl shadow-lg shadow-emerald-600/20"><TrendingUp size={24} className="text-white" /></div>
+        <Link to="/history" className="bg-gray-900 border border-gray-800 p-4 rounded-3xl flex items-center justify-between group hover:bg-gray-800 transition-all">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-600/20"><HistoryIcon size={18} className="text-white" /></div>
             <div>
-              <h3 className="font-bold text-lg">Evolução</h3>
-              <p className="text-gray-500 text-xs">{prs.length} Recordes</p>
+              <h3 className="font-bold text-sm">Histórico</h3>
+              <p className="text-gray-500 text-[10px]">Últimas sessões</p>
             </div>
           </div>
-          <ChevronRight className="text-emerald-500 group-hover:translate-x-1 transition-transform" />
+          <ChevronRight size={16} className="text-indigo-500" />
         </Link>
       </div>
+    </div>
+  );
+};
+
+// --- Scan Workout Component ---
+
+const ScanWorkout = ({ onAddTemplate, exercisesList, onAddExercises }: { 
+  onAddTemplate: (t: WorkoutTemplate) => void,
+  exercisesList: Exercise[],
+  onAddExercises: (e: Exercise[]) => void
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [scannedData, setScannedData] = useState<any>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setPreview(base64);
+      setLoading(true);
+      triggerHaptic('light');
+      try {
+        const data = await scanWorkoutFromImage(base64);
+        setScannedData(data);
+        triggerHaptic('success');
+      } catch (err) {
+        alert("Erro ao ler imagem. Tente uma foto mais nítida.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveScanned = () => {
+    if (!scannedData) return;
+
+    // 1. Criar novos exercícios que não existem na lista
+    const newExsToAdd: Exercise[] = [];
+    const templateExIds: string[] = [];
+
+    scannedData.exercises.forEach((scEx: any) => {
+      let existing = exercisesList.find(e => e.name.toLowerCase() === scEx.name.toLowerCase());
+      if (!existing) {
+        const newEx: Exercise = {
+          id: `scanned-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          name: scEx.name,
+          category: 'Escaneado'
+        };
+        newExsToAdd.push(newEx);
+        templateExIds.push(newEx.id);
+      } else {
+        templateExIds.push(existing.id);
+      }
+    });
+
+    if (newExsToAdd.length > 0) onAddExercises([...exercisesList, ...newExsToAdd]);
+
+    const newTemplate: WorkoutTemplate = {
+      id: `template-sc-${Date.now()}`,
+      name: scannedData.workoutName || "Treino Escaneado",
+      description: `Importado via IA em ${new Date().toLocaleDateString()}`,
+      exercises: templateExIds
+    };
+
+    onAddTemplate(newTemplate);
+    triggerHaptic('success');
+    navigate('/workouts');
+  };
+
+  return (
+    <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-black mb-2 pt-4">Escaneamento</h1>
+      <p className="text-gray-500 text-xs mb-8">Tire uma foto ou selecione um print de treino da sua galeria.</p>
+
+      {!scannedData && !loading && (
+        <div className="space-y-6">
+          <label className="block w-full cursor-pointer group">
+            <div className="border-2 border-dashed border-gray-800 rounded-[2.5rem] py-16 flex flex-col items-center justify-center gap-4 group-hover:border-indigo-500/50 transition-all bg-gray-900/20 group-active:scale-95">
+              <div className="bg-indigo-600/10 p-5 rounded-full text-indigo-500 group-hover:scale-110 transition-transform">
+                <ImageIcon size={40} />
+              </div>
+              <p className="text-sm font-bold text-gray-300">Selecione Foto ou Print</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest font-black">Galeria de Imagens</p>
+            </div>
+            <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          </label>
+          
+          <div className="bg-indigo-900/10 border border-indigo-500/20 p-4 rounded-3xl flex gap-4 items-center">
+             <Lightbulb className="text-indigo-400 shrink-0" size={20} />
+             <p className="text-[10px] text-gray-400 leading-relaxed italic">"Nossa IA consegue identificar exercícios, séries e repetições automaticamente para criar seus planos."</p>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="py-20 text-center flex flex-col items-center gap-6">
+          <div className="relative">
+             <Loader2 size={60} className="text-indigo-500 animate-spin" />
+             <FileSearch size={24} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-white">Analisando Treino...</h2>
+            <p className="text-gray-500 text-xs mt-1">Extraindo dados via Inteligência Artificial</p>
+          </div>
+        </div>
+      )}
+
+      {scannedData && !loading && (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 mb-6">
+            <div className="flex justify-between items-start mb-6">
+               <div>
+                  <h2 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Detectado como</h2>
+                  <h3 className="text-xl font-black text-white">{scannedData.workoutName || "Novo Treino"}</h3>
+               </div>
+               <button onClick={() => setScannedData(null)} className="text-gray-500 p-1.5 hover:text-white"><X size={18} /></button>
+            </div>
+
+            <div className="space-y-3 mb-8">
+              {scannedData.exercises.map((ex: any, idx: number) => (
+                <div key={idx} className="flex justify-between items-center bg-gray-950/50 p-3 rounded-2xl border border-gray-800">
+                  <span className="text-sm font-bold text-gray-300">{ex.name}</span>
+                  <div className="flex gap-2 text-[10px] font-black uppercase text-gray-500">
+                    <span className="bg-gray-800 px-2 py-0.5 rounded-lg">{ex.setsCount || 3} Séries</span>
+                    <span className="bg-gray-800 px-2 py-0.5 rounded-lg">{ex.repsSuggested || 12} Reps</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button 
+              onClick={handleSaveScanned}
+              className="w-full bg-indigo-600 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <Check size={16} /> Salvar nos Meus Planos
+            </button>
+          </div>
+          
+          <div className="flex justify-center">
+            <button onClick={() => setScannedData(null)} className="text-gray-500 text-xs font-bold underline decoration-gray-700">Tentar outra imagem</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -600,7 +752,7 @@ const WorkoutList = ({
   };
 
   const deleteTemplate = (id: string) => {
-    if (window.confirm("Deseja realmente excluir este plano?")) {
+    if (window.confirm("Deseja excluir?")) {
       onUpdateTemplates(templates.filter(t => t.id !== id));
     }
   };
@@ -621,7 +773,7 @@ const WorkoutList = ({
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <div className="flex justify-between items-center mb-8 pt-4">
-        <h1 className="text-3xl font-black">Planos de Treino</h1>
+        <h1 className="text-3xl font-black">Planos</h1>
         <div className="flex gap-2">
           <button 
             onClick={() => {
@@ -629,22 +781,22 @@ const WorkoutList = ({
               setEditingTemplateId(null);
               setEditingExerciseId(null);
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow-sm ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
           >
-            <Settings2 size={18} /> {isManageMode ? "Finalizar" : "Gerenciar"}
+            <Settings2 size={16} /> {isManageMode ? "Pronto" : "Ajustar"}
           </button>
         </div>
       </div>
 
       {isManageMode && (
-        <div className="mb-10 animate-in fade-in slide-in-from-top-4 bg-gray-900/40 p-5 rounded-3xl border border-gray-800">
-          <h2 className="text-indigo-400 font-black text-[10px] uppercase tracking-widest mb-4">Base de Exercícios (Clique para editar)</h2>
+        <div className="mb-8 animate-in fade-in slide-in-from-top-4 bg-gray-900/40 p-4 rounded-3xl border border-gray-800">
+          <h2 className="text-indigo-400 font-black text-[9px] uppercase tracking-widest mb-4">Base de Exercícios</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {exercises.map(ex => (
-              <div key={ex.id} className="bg-gray-900 border border-gray-800 p-3 rounded-xl flex justify-between items-center gap-2">
+              <div key={ex.id} className="bg-gray-900 border border-gray-800 p-2 rounded-xl flex justify-between items-center gap-1.5">
                 {editingExerciseId === ex.id ? (
                   <input 
-                    className="bg-gray-800 text-white text-[16px] w-full p-2 rounded-lg outline-none border border-indigo-500"
+                    className="bg-gray-800 text-white text-[11px] w-full p-1 rounded-lg outline-none border border-indigo-500"
                     value={tempName}
                     onChange={e => setTempName(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && saveEditExercise()}
@@ -653,8 +805,8 @@ const WorkoutList = ({
                   />
                 ) : (
                   <>
-                    <span className="text-[12px] truncate font-bold text-gray-100">{ex.name}</span>
-                    <button onClick={() => startEditExercise(ex)} className="text-gray-600 hover:text-indigo-400 p-1"><Edit2 size={12}/></button>
+                    <span className="text-[10px] truncate font-bold text-gray-100">{ex.name}</span>
+                    <button onClick={() => startEditExercise(ex)} className="text-gray-600 hover:text-indigo-400"><Edit2 size={10}/></button>
                   </>
                 )}
               </div>
@@ -663,46 +815,46 @@ const WorkoutList = ({
         </div>
       )}
 
-      <div className="grid gap-4">
+      <div className="grid gap-3.5">
         {templates.map(template => (
           <div key={template.id} className="relative group">
-            <div className={`bg-gray-900 border border-gray-800 p-6 rounded-[2rem] transition-all ${isManageMode ? 'ring-2 ring-indigo-500/20' : 'hover:border-indigo-500/50'}`}>
-              <div className="flex justify-between items-start mb-2">
+            <div className={`bg-gray-900 border border-gray-800 p-5 rounded-[1.8rem] transition-all ${isManageMode ? 'ring-2 ring-indigo-500/20' : 'hover:border-indigo-500/50'}`}>
+              <div className="flex justify-between items-start mb-1.5">
                 {editingTemplateId === template.id ? (
-                  <div className="flex items-center gap-2 flex-1">
+                  <div className="flex items-center gap-1.5 flex-1">
                     <input 
-                      className="bg-gray-800 border border-indigo-500 rounded-2xl px-4 py-3 text-white font-bold outline-none flex-1 text-[16px]"
+                      className="bg-gray-800 border border-indigo-500 rounded-2xl px-3 py-1.5 text-white font-bold outline-none flex-1 text-sm"
                       value={tempName}
                       onChange={e => setTempName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && saveEditTemplate()}
                       autoFocus
                     />
-                    <button onClick={saveEditTemplate} className="text-white bg-emerald-600 p-3 rounded-2xl shadow-lg"><Check size={20}/></button>
+                    <button onClick={saveEditTemplate} className="text-white bg-emerald-600 p-2 rounded-xl shadow-lg"><Check size={16}/></button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 w-full justify-between">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-black text-gray-100">{template.name}</h3>
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-base font-black text-gray-100">{template.name}</h3>
                       {isManageMode && (
-                        <button onClick={() => startEditTemplate(template)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={16} /></button>
+                        <button onClick={() => startEditTemplate(template)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={13} /></button>
                       )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                        {isManageMode ? (
-                        <button onClick={() => deleteTemplate(template.id)} className="bg-red-500/10 text-red-500 p-3 rounded-2xl border border-red-500/20"><Trash2 size={20}/></button>
+                        <button onClick={() => deleteTemplate(template.id)} className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20"><Trash2 size={16}/></button>
                       ) : (
-                        <Link to={`/active/${template.id}`} className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl shadow-indigo-600/30 active:scale-95 transition-all">
-                           <Play size={20} fill="currentColor" />
+                        <Link to={`/active/${template.id}`} className="bg-indigo-600 p-2 rounded-2xl text-white shadow-lg active:scale-95 transition-all">
+                           <Play size={18} fill="currentColor" />
                         </Link>
                       )}
                     </div>
                   </div>
                 )}
               </div>
-              <p className="text-gray-500 text-xs mb-6 font-medium">{template.description}</p>
-              <div className="flex flex-wrap gap-2">
+              <p className="text-gray-500 text-[10px] mb-3.5 font-medium">{template.description}</p>
+              <div className="flex flex-wrap gap-1.5">
                 {template.exercises.map(exId => (
-                  <span key={exId} className="bg-gray-800/80 text-gray-400 text-[10px] px-3 py-1 rounded-full uppercase font-black tracking-tight">
+                  <span key={exId} className="bg-gray-800/80 text-gray-400 text-[8px] px-2 py-0.5 rounded-full uppercase font-black tracking-tight">
                     {exercises.find(e => e.id === exId)?.name || 'Exercício'}
                   </span>
                 ))}
@@ -712,16 +864,22 @@ const WorkoutList = ({
         ))}
       </div>
       
-      <div className="fixed bottom-24 right-6 flex flex-col gap-4 items-center z-50 md:bottom-10 md:right-10">
-        <Link to="/" className="bg-gray-800 p-3.5 rounded-full shadow-2xl text-gray-400 border border-gray-700 active:scale-90">
-          <HomeIcon size={22} />
+      <div className="fixed bottom-24 right-6 flex flex-col gap-3 items-center z-50 md:bottom-10 md:right-10">
+        <Link to="/" className="bg-gray-800 p-2.5 rounded-full shadow-2xl text-gray-400 border border-gray-700 active:scale-90">
+          <HomeIcon size={20} />
         </Link>
-        <button onClick={addNewWorkout} className="bg-indigo-600 p-4 rounded-full shadow-2xl text-white border border-indigo-400 active:scale-90">
-          <Plus size={26} strokeWidth={3} />
+        <button onClick={addNewWorkout} className="bg-indigo-600 p-3 rounded-full shadow-2xl text-white border border-indigo-400 active:scale-90">
+          <Plus size={22} strokeWidth={3} />
         </button>
       </div>
     </div>
   );
+};
+
+// Componente Wrapper para garantir que a key mude e resete o estado ao trocar de treino
+const ActiveWorkoutWrapper = (props: any) => {
+  const { id } = useParams();
+  return <ActiveWorkout key={id} {...props} />;
 };
 
 const ActiveWorkout = ({ 
@@ -753,6 +911,7 @@ const ActiveWorkout = ({
   
   const exerciseRefs = useRef<(HTMLDivElement | null)[]>([]);
 
+  // Carregamento inicial do estado (Rascunho ou Memória de Carga ou Padrão)
   const [activeExercises, setActiveExercises] = useState<ActiveExercise[]>(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
@@ -788,7 +947,19 @@ const ActiveWorkout = ({
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
   const [focusedExerciseIdx, setFocusedExerciseIdx] = useState<number | null>(null);
   const [focusedSetKey, setFocusedSetKey] = useState<string | null>(null);
-  const [aiTips, setAiTips] = useState<Record<number, { text: string; loading: boolean }>>({});
+  const [aiTips, setAiTips] = useState<Record<number, { response?: AiTipResponse; loading: boolean }>>({});
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // MONITORAMENTO DE SALVAMENTO AUTOMÁTICO (Auto-save)
+  useEffect(() => {
+    setIsSyncing(true);
+    const timeout = setTimeout(() => {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(activeExercises));
+      setIsSyncing(false);
+    }, 300);
+    
+    return () => clearTimeout(timeout);
+  }, [activeExercises, DRAFT_KEY]);
 
   useEffect(() => {
     localStorage.setItem('titanlift_last_active_template', templateId || '');
@@ -816,10 +987,6 @@ const ActiveWorkout = ({
     return () => clearInterval(interval);
   }, [isResuming, templateId]);
 
-  useEffect(() => {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(activeExercises));
-  }, [activeExercises, DRAFT_KEY]);
-
   const [plateWeight, setPlateWeight] = useState<number | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showAddExerciseList, setShowAddExerciseList] = useState(false);
@@ -839,10 +1006,10 @@ const ActiveWorkout = ({
   const overallProgress = totalSets > 0 ? (totalCompletedSets / totalSets) * 100 : 0;
 
   const handleAiTip = async (exIdx: number, exerciseName: string) => {
-    setAiTips(prev => ({ ...prev, [exIdx]: { text: prev[exIdx]?.text || '', loading: true } }));
+    setAiTips(prev => ({ ...prev, [exIdx]: { ...prev[exIdx], loading: true } }));
     triggerHaptic('light');
-    const tip = await getExerciseTip(exerciseName);
-    setAiTips(prev => ({ ...prev, [exIdx]: { text: tip, loading: false } }));
+    const tipResponse = await getExerciseTip(exerciseName);
+    setAiTips(prev => ({ ...prev, [exIdx]: { response: tipResponse, loading: false } }));
   };
 
   const persistExerciseConfig = (exerciseIdx: number) => {
@@ -865,7 +1032,6 @@ const ActiveWorkout = ({
       window.dispatchEvent(new CustomEvent('titanlift_start_rest', { detail: { exerciseId: exId } }));
       localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
       
-      // Feedbacks
       triggerHaptic('medium');
       playTickSound();
     } else if (field === 'completed' && value === false) {
@@ -964,34 +1130,40 @@ const ActiveWorkout = ({
 
   return (
     <div className="p-4 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
-      <div className="fixed top-12 left-0 right-0 z-[100] bg-gray-950/95 backdrop-blur-lg px-6 pt-[env(safe-area-inset-top)] pb-4 border-b border-gray-800 shadow-2xl md:left-20">
+      <div className="fixed top-12 left-0 right-0 z-[100] bg-gray-950/95 backdrop-blur-lg px-6 pt-[env(safe-area-inset-top)] pb-2.5 border-b border-gray-800 shadow-2xl md:left-20">
           <div className="max-w-4xl mx-auto">
-            <div className="flex justify-between items-center mb-2">
-               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                 <Clock size={12} /> Academia: {activeDuration}
+            <div className="flex justify-between items-center mb-1.5">
+               <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                 <Clock size={10} /> {activeDuration}
                </span>
-               <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{Math.round(overallProgress)}%</span>
+               <div className="flex items-center gap-1.5">
+                 {isSyncing ? (
+                   <span className="text-[7px] font-black text-gray-500 uppercase flex items-center gap-1"><Loader2 size={7} className="animate-spin" /> Salvando</span>
+                 ) : (
+                   <span className="text-[7px] font-black text-emerald-500/50 uppercase flex items-center gap-1"><CloudCheck size={7} /> Salvo</span>
+                 )}
+                 <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">{Math.round(overallProgress)}%</span>
+               </div>
             </div>
             <div className="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
-               <div className="h-full bg-indigo-500 transition-all duration-700 ease-in-out shadow-[0_0_15px_rgba(99,102,241,0.5)]" style={{width: `${overallProgress}%`}} />
+               <div className="h-full bg-indigo-500 transition-all duration-700 ease-in-out" style={{width: `${overallProgress}%`}} />
             </div>
           </div>
       </div>
 
-      <div className="flex justify-between items-center mb-6 pt-36">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setShowExitConfirm(true)} className="p-2 -ml-2 text-gray-500 hover:text-white transition-all"><ArrowLeft size={24} /></button>
-          <h1 className="text-2xl font-black truncate max-w-[180px]">{template.name}</h1>
+      <div className="flex justify-between items-center mb-5 pt-32">
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setShowExitConfirm(true)} className="p-1.5 -ml-1 text-gray-500 hover:text-white transition-all"><ArrowLeft size={20} /></button>
+          <h1 className="text-lg font-black truncate max-w-[160px]">{template.name}</h1>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setIsManageMode(!isManageMode)} className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl transition-all ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-            <Settings2 size={18} /> <span className="hidden sm:inline">Gerenciar</span>
+        <div className="flex gap-1">
+          <button onClick={() => setIsManageMode(!isManageMode)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-black text-[9px] uppercase shadow-md transition-all ${isManageMode ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+            <Settings2 size={12} /> <span className="hidden sm:inline">Ajustar</span>
           </button>
-          <button onClick={handleFinish} className="bg-emerald-600 text-white px-6 py-2.5 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-emerald-500 active:scale-95 transition-all">Finalizar</button>
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3.5">
         {activeExercises.map((ex, exIdx) => {
           const isFocused = focusedExerciseIdx === exIdx;
           const tipData = aiTips[exIdx];
@@ -1004,18 +1176,18 @@ const ActiveWorkout = ({
                 setFocusedExerciseIdx(exIdx);
                 localStorage.setItem(LAST_ACTIVE_IDX_KEY, exIdx.toString());
               }}
-              className={`bg-gray-900 rounded-[2rem] p-4 border transition-all duration-300 shadow-xl relative overflow-hidden ${isFocused ? 'border-indigo-500/50 bg-gray-900/90' : 'border-gray-800'}`}
+              className={`bg-gray-900 rounded-[1.8rem] p-3.5 border transition-all duration-300 shadow-xl relative overflow-hidden ${isFocused ? 'border-indigo-500/50 bg-gray-900/90' : 'border-gray-800'}`}
             >
               {isFocused && (
-                <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,1)]" />
+                <div className="absolute left-0 top-0 bottom-0 w-[1.5px] bg-indigo-500" />
               )}
 
-              <div className="flex justify-between items-center mb-4 px-2">
-                <div className="flex-1 flex items-center gap-2">
+              <div className="flex justify-between items-center mb-3.5 px-0.5">
+                <div className="flex-1 flex items-center gap-1.5">
                   {editingExIndex === exIdx ? (
-                    <div className="flex gap-2 w-full items-center">
+                    <div className="flex gap-1.5 w-full items-center">
                       <input 
-                        className="bg-gray-800 border border-indigo-500 rounded-xl px-3 py-2 text-white font-bold outline-none flex-1 text-[16px]"
+                        className="bg-gray-800 border border-indigo-500 rounded-xl px-2.5 py-1.5 text-white font-bold outline-none flex-1 text-xs"
                         value={ex.name}
                         onChange={(e) => {
                           const updated = [...activeExercises];
@@ -1025,61 +1197,70 @@ const ActiveWorkout = ({
                         onKeyDown={(e) => e.key === 'Enter' && setEditingExIndex(null)}
                         autoFocus
                       />
-                      <button onClick={() => setEditingExIndex(null)} className="bg-emerald-600 text-white p-2 rounded-xl transition-all active:scale-90"><Check size={18} /></button>
+                      <button onClick={() => setEditingExIndex(null)} className="bg-emerald-600 text-white p-1.5 rounded-xl transition-all active:scale-90"><Check size={14} /></button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <h2 className={`text-lg font-black transition-colors ${isFocused ? 'text-indigo-400' : 'text-gray-100'}`}>{ex.name}</h2>
-                      <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <h2 className={`text-[15px] font-black transition-colors ${isFocused ? 'text-indigo-400' : 'text-gray-100'}`}>{ex.name}</h2>
+                      <div className="flex items-center gap-0.5">
                         <button 
                           onClick={(e) => { e.stopPropagation(); setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx); triggerHaptic('light'); }} 
-                          className={`p-2 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
-                          title="Anotações"
+                          className={`p-1 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
                         >
-                          <NotebookPen size={18} />
+                          <NotebookPen size={14} />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleAiTip(exIdx, ex.name); }} 
-                          className={`p-2 rounded-lg transition-all ${tipData?.text ? 'text-amber-400 bg-amber-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
-                          title="Dica IA"
+                          className={`p-1 rounded-lg transition-all ${tipData?.response ? 'text-amber-400 bg-amber-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
                         >
-                          {tipData?.loading ? <Loader2 size={18} className="animate-spin text-indigo-400" /> : <Sparkles size={18} />}
+                          {tipData?.loading ? <Loader2 size={14} className="animate-spin text-indigo-400" /> : <Sparkles size={14} />}
                         </button>
                       </div>
-                      {isManageMode && <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 hover:text-indigo-400 p-1"><Edit2 size={14} /></button>}
+                      {isManageMode && <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 hover:text-indigo-400"><Edit2 size={11} /></button>}
                     </div>
                   )}
                 </div>
                 {isManageMode && (
-                  <button onClick={() => { if (confirm("Remover este exercício do treino atual?")) { const updated = [...activeExercises]; updated.splice(exIdx, 1); setActiveExercises(updated); triggerHaptic('medium'); } }} className="bg-red-500/10 text-red-500 p-2 rounded-xl border border-red-500/20 ml-2 transition-all active:scale-90">
-                    <Trash2 size={16} />
+                  <button onClick={() => { if (confirm("Remover exercício?")) { const updated = [...activeExercises]; updated.splice(exIdx, 1); setActiveExercises(updated); triggerHaptic('medium'); } }} className="bg-red-500/10 text-red-500 p-1.5 rounded-xl border border-red-500/20 ml-2">
+                    <Trash2 size={12} />
                   </button>
                 )}
               </div>
 
-              {tipData?.text && (
+              {tipData?.response?.text && (
                 <div className="mb-4 animate-in slide-in-from-top-2 duration-300">
-                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 flex gap-3">
-                    <Lightbulb size={18} className="text-amber-400 shrink-0" />
-                    <p className="text-[11px] leading-relaxed text-gray-300 font-medium italic">"{tipData.text}"</p>
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-3 flex flex-col gap-1.5">
+                    <div className="flex gap-2">
+                      <Lightbulb size={15} className="text-amber-400 shrink-0" />
+                      <p className="text-[10px] leading-relaxed text-gray-300 font-medium italic">"{tipData.response.text}"</p>
+                    </div>
+                    {tipData.response.sources && tipData.response.sources.length > 0 && (
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5 pl-6">
+                        {tipData.response.sources.map((src, i) => (
+                          <a key={i} href={src.uri} target="_blank" rel="noopener noreferrer" className="text-[8px] text-indigo-400 hover:text-indigo-300 underline truncate max-w-[110px]">
+                            {src.title || 'Ver fonte'}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
               {editingNoteIndex === exIdx && (
                 <textarea 
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-xs text-gray-300 mb-4 h-24 outline-none focus:ring-1 focus:ring-indigo-500" 
-                  placeholder="Dicas técnicas ou observações da série..." 
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-2.5 text-[10px] text-gray-300 mb-4 h-20 outline-none focus:ring-1 focus:ring-indigo-500" 
+                  placeholder="Notas..." 
                   value={ex.notes} 
                   onChange={(e) => updateNote(exIdx, e.target.value)} 
                 />
               )}
               
-              <div className="mb-6"><RestTimer exerciseId={ex.exerciseId} /></div>
+              <div className="mb-4"><RestTimer exerciseId={ex.exerciseId} /></div>
               
-              <div className="space-y-1.5 mb-5">
-                <div className="grid gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] text-[9px] font-black text-gray-600 px-2 uppercase text-center items-center mb-1">
-                  <span>Série</span><span>Peso (kg)</span><span>Reps</span><span>OK</span><span />
+              <div className="space-y-1 mb-3.5">
+                <div className="grid gap-1.5 [grid-template-columns:2.2rem_1fr_1fr_1.8rem_1.2rem] text-[7px] font-black text-gray-600 px-0.5 uppercase text-center items-center mb-1">
+                  <span>Série</span><span>Peso</span><span>Reps</span><span>OK</span><span />
                 </div>
                 {ex.sets.map((set, setIdx) => {
                   const sKey = `${exIdx}-${setIdx}`;
@@ -1087,73 +1268,83 @@ const ActiveWorkout = ({
                   return (
                     <div 
                       key={setIdx} 
-                      className={`grid items-center gap-2 [grid-template-columns:3rem_1fr_1fr_2rem_1.5rem] p-1 rounded-xl transition-all duration-300 border ${set.completed ? 'bg-gray-950/50 border-emerald-500/30 opacity-60' : 'border-transparent'} ${isSetFocused ? 'ring-1 ring-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.15)] bg-gray-800/40' : ''}`}
+                      className={`grid items-center gap-1.5 [grid-template-columns:2.2rem_1fr_1fr_1.8rem_1.2rem] p-0.5 rounded-xl transition-all border ${
+                        set.completed ? 'bg-gray-950 border-emerald-500/40 opacity-70' : 'border-transparent'
+                      } ${isSetFocused ? 'ring-2 ring-indigo-500/40 bg-gray-800/20' : ''}`}
                       onFocus={() => setFocusedSetKey(sKey)}
                       onBlur={() => setFocusedSetKey(null)}
                     >
-                      <span className={`text-xs font-black transition-colors text-center ${set.completed ? 'text-gray-700' : 'text-gray-600'}`}>{setIdx + 1}</span>
+                      <span className={`text-[10px] font-black transition-colors text-center ${set.completed ? 'text-gray-700' : 'text-gray-600'}`}>{setIdx + 1}</span>
                       <div className="relative">
                         <input 
                           type="number" inputMode="decimal" 
-                          className={`w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${set.completed ? 'text-gray-500 bg-gray-900' : ''}`} 
+                          className={`w-full bg-gray-800 h-8 rounded-xl text-center font-bold border border-gray-800 text-[13px] outline-none focus:ring-1 focus:ring-indigo-500 ${set.completed ? 'text-gray-500 bg-gray-900' : 'text-white'}`} 
                           value={set.weight === 0 ? '' : set.weight} 
                           placeholder="0" 
                           onChange={(e) => updateSet(exIdx, setIdx, 'weight', e.target.value === '' ? 0 : Number(e.target.value))} 
                         />
-                        <button onClick={() => { setPlateWeight(Number(set.weight)); triggerHaptic('light'); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={14}/></button>
+                        <button onClick={() => { setPlateWeight(Number(set.weight)); triggerHaptic('light'); }} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-600 hover:text-indigo-400"><Calculator size={10}/></button>
                       </div>
                       <select 
-                        className={`w-full bg-gray-800 h-11 rounded-xl text-center font-bold border border-gray-800 text-[16px] appearance-none outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer ${set.completed ? 'text-gray-500 bg-gray-900' : ''}`} 
+                        className={`w-full bg-gray-800 h-8 rounded-xl text-center font-bold border border-gray-800 text-[13px] appearance-none outline-none focus:ring-1 focus:ring-indigo-500 ${set.completed ? 'text-gray-500 bg-gray-900' : 'text-white'}`} 
                         value={set.reps || 10} 
                         onChange={(e) => updateSet(exIdx, setIdx, 'reps', Number(e.target.value))}
                       >
                         {Array.from({ length: 30 }, (_, i) => i + 1).map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
                       <button 
-                        className={`h-11 w-full rounded-xl flex items-center justify-center transition-all ${set.completed ? 'bg-emerald-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-gray-800 text-gray-600'}`} 
+                        className={`h-8 w-full rounded-xl flex items-center justify-center transition-all ${set.completed ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-600'}`} 
                         onClick={() => updateSet(exIdx, setIdx, 'completed', !set.completed)}
-                      ><CheckCircle2 size={20} /></button>
+                      ><CheckCircle2 size={16} /></button>
                       <button 
                         onClick={() => { const updated = [...activeExercises]; updated[exIdx].sets.splice(setIdx, 1); setActiveExercises(updated); persistExerciseConfig(exIdx); triggerHaptic('medium'); }} 
                         disabled={ex.sets.length <= 1} 
-                        className="text-gray-700 hover:text-red-500 p-2 disabled:opacity-0 transition-all"
-                      ><Trash2 size={16}/></button>
+                        className="text-gray-700 hover:text-red-500 p-0.5 disabled:opacity-0 transition-all"
+                      ><Trash2 size={12}/></button>
                     </div>
                   );
                 })}
               </div>
               <button 
                 onClick={() => { const updated = [...activeExercises]; const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1]; updated[exIdx].sets.push({...lastSet, completed: false}); setActiveExercises(updated); persistExerciseConfig(exIdx); triggerHaptic('light'); }} 
-                className="w-full border border-dashed border-gray-800 text-gray-500 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800/50 transition-all active:scale-95"
+                className="w-full border border-dashed border-gray-800 text-gray-500 py-2 rounded-2xl text-[8px] font-black uppercase tracking-widest transition-all active:scale-95"
               >
-                <Plus size={14} className="inline mr-1"/> Nova Série
+                <Plus size={11} className="inline mr-1"/> Adicionar Série
               </button>
             </div>
           );
         })}
       </div>
 
-      <button onClick={() => setShowAddExerciseList(true)} className="w-full mt-8 bg-gray-900 border border-indigo-500/20 text-indigo-400 py-4 rounded-3xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 active:scale-95 transition-all"><PlusCircle size={20}/> Incluir Exercício</button>
+      <button onClick={() => setShowAddExerciseList(true)} className="w-full mt-6 bg-gray-900 border border-indigo-500/20 text-indigo-400 py-3 rounded-3xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-lg active:scale-95 transition-all mb-20"><PlusCircle size={16}/> Novo Exercício</button>
       
+      {/* FAB FINALIZAR */}
+      <button 
+        onClick={handleFinish} 
+        className="fixed bottom-24 right-5 bg-emerald-600 text-white p-4 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] z-[200] active:scale-90 transition-all border-4 border-gray-950 ring-2 ring-emerald-500/20"
+      >
+        <CheckCircle2 size={26} strokeWidth={3} />
+      </button>
+
       {showAddExerciseList && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[300] p-6 pt-20 animate-in fade-in zoom-in-95 flex flex-col">
            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-black">Lista de Exercícios</h3>
-              <button onClick={() => setShowAddExerciseList(false)} className="bg-gray-800 p-2 rounded-full active:scale-90 transition-all"><X size={24}/></button>
+              <h3 className="text-xl font-black">Exercícios</h3>
+              <button onClick={() => setShowAddExerciseList(false)} className="bg-gray-800 p-1.5 rounded-full active:scale-90 transition-all"><X size={20}/></button>
            </div>
-           <div className="bg-gray-900 border border-gray-800 p-4 rounded-3xl mb-8">
-             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Novo Exercício</p>
+           <div className="bg-gray-900 border border-gray-800 p-3.5 rounded-3xl mb-6">
+             <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-2.5">Criar Novo</p>
              <div className="flex gap-2">
-               <input className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white font-bold outline-none text-[16px] focus:ring-2 focus:ring-indigo-500" placeholder="Nome do movimento..." value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateNewExercise()} />
-               <button onClick={handleCreateNewExercise} className="bg-indigo-600 text-white p-3 rounded-xl disabled:opacity-50 active:scale-90 transition-all" disabled={!newExerciseName.trim()}><PlusSquare size={24}/></button>
+               <input className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3.5 py-2 text-white font-bold outline-none text-sm focus:ring-1 focus:ring-indigo-500" placeholder="Nome..." value={newExerciseName} onChange={(e) => setNewExerciseName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateNewExercise()} />
+               <button onClick={handleCreateNewExercise} className="bg-indigo-600 text-white p-2 rounded-xl disabled:opacity-50 active:scale-90 transition-all" disabled={!newExerciseName.trim()}><PlusSquare size={18}/></button>
              </div>
            </div>
-           <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Sua Biblioteca</p>
-           <div className="grid gap-3 overflow-y-auto flex-1 no-scrollbar pb-20">
+           <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-2.5">Biblioteca</p>
+           <div className="grid gap-2 overflow-y-auto flex-1 no-scrollbar pb-20">
               {exercises.map(ex => (
-                <button key={ex.id} onClick={() => addExerciseToPlan(ex)} className="bg-gray-900 border border-gray-800 p-5 rounded-[2rem] text-left flex items-center justify-between group active:bg-gray-800 transition-all">
-                  <span className="font-bold text-lg text-gray-100">{ex.name}</span>
-                  <Plus className="text-indigo-500 group-active:scale-125 transition-transform" />
+                <button key={ex.id} onClick={() => addExerciseToPlan(ex)} className="bg-gray-900 border border-gray-800 p-4 rounded-[1.5rem] text-left flex items-center justify-between group active:bg-gray-800 transition-all">
+                  <span className="font-bold text-sm text-gray-100">{ex.name}</span>
+                  <Plus size={16} className="text-indigo-500" />
                 </button>
               ))}
            </div>
@@ -1184,56 +1375,56 @@ const WorkoutResult = ({ sessions, onUpdateNotes }: { sessions: WorkoutSession[]
 
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
-      <div className="text-center mb-10 pt-4">
-        <div className="inline-flex bg-emerald-600 p-6 rounded-[2.5rem] mb-6 shadow-2xl animate-bounce"><Trophy size={48} className="text-white" /></div>
-        <h1 className="text-4xl font-black mb-2 text-white">Treino Salvo!</h1>
-        <p className="text-gray-500 font-medium">Histórico atualizado com sucesso.</p>
+      <div className="text-center mb-8 pt-4">
+        <div className="inline-flex bg-emerald-600 p-5 rounded-[2rem] mb-4 shadow-2xl animate-bounce"><Trophy size={40} className="text-white" /></div>
+        <h1 className="text-3xl font-black mb-1.5 text-white">Salvo!</h1>
+        <p className="text-gray-500 text-sm font-medium">Histórico atualizado.</p>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-[2.5rem] p-8 mb-6 shadow-xl">
-        <div className="flex flex-col items-center gap-2 mb-8">
-            <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest">Sessão Finalizada em</p>
-            <p className="text-xs text-gray-500 mt-2 font-bold">{new Date(session.date).toLocaleDateString()} às {new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+      <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 mb-6 shadow-xl">
+        <div className="flex flex-col items-center gap-1.5 mb-6 text-center">
+            <p className="text-[9px] text-gray-600 font-black uppercase tracking-widest">Sessão Finalizada</p>
+            <p className="text-[10px] text-gray-500 font-bold">{new Date(session.date).toLocaleDateString()} às {new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
         
-        <div className="mb-8 pt-4 border-t border-gray-800">
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4 flex items-center gap-2">
-            <NotebookPen size={12} className="text-indigo-400" /> Como foi o treino?
+        <div className="mb-6 pt-4 border-t border-gray-800">
+          <h3 className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-3 flex items-center gap-1.5">
+            <NotebookPen size={11} className="text-indigo-400" /> Como foi?
           </h3>
           <div className="relative">
             <textarea 
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Ex: Treino rendeu muito, foquei em amplitude no agachamento..."
-              className="w-full bg-gray-950 border border-gray-800 rounded-2xl p-4 text-sm text-gray-300 h-32 outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+              placeholder="Foquei em carga..."
+              className="w-full bg-gray-950 border border-gray-800 rounded-2xl p-3.5 text-xs text-gray-300 h-28 outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
             />
             <button 
               onClick={handleSaveNote}
-              className={`absolute bottom-3 right-3 p-2 rounded-xl flex items-center gap-2 transition-all ${isSaved ? 'bg-emerald-600 text-white' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/30'}`}
+              className={`absolute bottom-2.5 right-2.5 p-1.5 rounded-xl flex items-center gap-1.5 transition-all ${isSaved ? 'bg-emerald-600 text-white' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-600/30'}`}
             >
-              {isSaved ? <Check size={16} /> : <Save size={16} />}
-              <span className="text-[10px] font-black uppercase tracking-widest">{isSaved ? 'Salvo' : 'Salvar Nota'}</span>
+              {isSaved ? <Check size={12} /> : <Save size={12} />}
+              <span className="text-[9px] font-black uppercase tracking-widest">{isSaved ? 'Salvo' : 'Salvar'}</span>
             </button>
           </div>
         </div>
 
-        <div className="space-y-4 mb-8">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 border-b border-gray-800 pb-2">Exercícios Realizados</h3>
+        <div className="space-y-3 mb-6">
+            <h3 className="text-[9px] font-black uppercase tracking-widest text-gray-500 border-b border-gray-800 pb-1.5">Realizados</h3>
             {session.exercises.map((ex, i) => (
-                <div key={i} className="flex justify-between items-center py-1">
-                    <span className="text-sm font-bold text-gray-300">{ex.name}</span>
-                    <span className="text-xs font-black text-indigo-500 bg-indigo-500/10 px-3 py-1 rounded-full">{ex.sets.filter(s => s.completed).length} Séries</span>
+                <div key={i} className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-gray-300">{ex.name}</span>
+                    <span className="text-[9px] font-black text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-full">{ex.sets.filter(s => s.completed).length} Séries</span>
                 </div>
             ))}
         </div>
 
-        <div className="mt-10 pt-8 border-t border-gray-800 text-center space-y-4">
-          <div className="inline-flex items-center justify-center p-2 bg-indigo-500/10 rounded-full text-indigo-400"><Heart size={16} fill="currentColor" /></div>
-          <p className="text-sm font-black text-gray-100">TitanLift: Evolução é o foco.</p>
+        <div className="mt-8 pt-6 border-t border-gray-800 text-center space-y-3">
+          <div className="inline-flex items-center justify-center p-1.5 bg-indigo-500/10 rounded-full text-indigo-400"><Heart size={14} fill="currentColor" /></div>
+          <p className="text-[10px] font-black text-gray-100">TitanLift: Evolução é o foco.</p>
         </div>
       </div>
 
-      <button onClick={() => navigate('/')} className="w-full bg-indigo-600 py-5 rounded-3xl font-black uppercase tracking-widest text-sm shadow-2xl active:scale-95 transition-all">Ir para a Home</button>
+      <button onClick={() => navigate('/')} className="w-full bg-indigo-600 py-4 rounded-3xl font-black uppercase tracking-widest text-[10px] shadow-2xl active:scale-95 transition-all">Home</button>
     </div>
   );
 };
@@ -1251,51 +1442,50 @@ const History = ({ sessions, onDeleteSession }: { sessions: WorkoutSession[], on
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <h1 className="text-3xl font-black mb-8 pt-4">Histórico</h1>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 mb-8">
-        <div className="flex items-center gap-3 mb-6"><CalendarDays size={20} className="text-indigo-400" /><h2 className="text-sm font-black uppercase tracking-widest text-gray-300">Intensidade</h2></div>
-        <div className="h-40 w-full min-h-[160px]">
-          {/* Fix: use double quotes and check payload length in Tooltip content */}
+      <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-5 mb-8">
+        <div className="flex items-center gap-2.5 mb-5"><CalendarDays size={18} className="text-indigo-400" /><h2 className="text-[11px] font-black uppercase tracking-widest text-gray-300">Intensidade</h2></div>
+        <div className="h-32 w-full min-h-[120px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={stats}>
-              <XAxis dataKey="displayFull" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6b7280', fontWeight: 'bold'}} />
+              <XAxis dataKey="displayFull" axisLine={false} tickLine={false} tick={{fontSize: 8, fill: '#6b7280', fontWeight: 'bold'}} />
               <YAxis hide />
               <Tooltip cursor={{fill: 'rgba(99,102,241,0.05)'}} content={({ active, payload }) => active && payload && payload.length > 0 ? (
-                <div className="bg-gray-950 border border-gray-800 p-2 rounded-xl text-[10px] font-black text-indigo-400">
+                <div className="bg-gray-950 border border-gray-800 p-2 rounded-xl text-[8px] font-black text-indigo-400">
                   {payload[0].payload.duration}
                 </div>
               ) : null} />
-              <Bar dataKey="seconds" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="seconds" fill="#6366f1" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3.5">
         {sessions.length === 0 ? (
-          <div className="text-center py-20 bg-gray-900/20 border border-dashed border-gray-800 rounded-[2rem]">
-            <HistoryIcon size={40} className="text-gray-800 mx-auto mb-4" />
-            <p className="text-gray-500 font-bold">Nenhum treino registrado.</p>
+          <div className="text-center py-16 bg-gray-900/20 border border-dashed border-gray-800 rounded-[2rem]">
+            <HistoryIcon size={32} className="text-gray-800 mx-auto mb-3" />
+            <p className="text-gray-500 text-xs font-bold">Nenhum treino registrado.</p>
           </div>
         ) : sessions.map(s => (
-          <div key={s.id} className="bg-gray-900 border border-gray-800 p-6 rounded-[2rem] shadow-sm hover:border-gray-700 transition-all relative">
-            <div className="flex justify-between items-start mb-4">
+          <div key={s.id} className="bg-gray-900 border border-gray-800 p-5 rounded-[1.8rem] shadow-sm hover:border-gray-700 transition-all relative">
+            <div className="flex justify-between items-start mb-3">
               <div className="flex-1">
-                <p className="font-black text-indigo-400 text-lg">{s.templateName}</p>
-                <p className="text-[10px] text-gray-400 font-black uppercase mt-1">{new Date(s.date).toLocaleDateString()} às {new Date(s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                <p className="font-black text-indigo-400 text-sm">{s.templateName}</p>
+                <p className="text-[8px] text-gray-400 font-black uppercase mt-0.5">{new Date(s.date).toLocaleDateString()} às {new Date(s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
-              <button onClick={() => { if (window.confirm("Excluir este treino do seu histórico?")) { onDeleteSession(s.id); triggerHaptic('medium'); } }} className="text-gray-600 hover:text-red-500 p-2 transition-all active:scale-90"><Trash2 size={20} /></button>
+              <button onClick={() => { if (window.confirm("Excluir?")) { onDeleteSession(s.id); triggerHaptic('medium'); } }} className="text-gray-600 hover:text-red-500 p-1 transition-all active:scale-90"><Trash2 size={16} /></button>
             </div>
             
             {s.generalNotes && (
-              <div className="mb-4 bg-gray-950/50 p-3 rounded-2xl border border-gray-800 flex gap-3 items-start">
-                <MessageSquareQuote size={14} className="text-indigo-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-gray-400 italic line-clamp-2">{s.generalNotes}</p>
+              <div className="mb-3 bg-gray-950/50 p-2 rounded-xl border border-gray-800 flex gap-2 items-start">
+                <MessageSquareQuote size={10} className="text-indigo-400 shrink-0 mt-0.5" />
+                <p className="text-[9px] text-gray-400 italic line-clamp-2">{s.generalNotes}</p>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Volume Estimado</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.reduce((c, d) => c + d.weight, 0), 0)}kg</p></div>
-                <div className="bg-gray-950/40 p-3 rounded-2xl border border-gray-800/50"><p className="text-[8px] font-black text-gray-600 uppercase mb-1">Séries OK</p><p className="text-sm font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.filter(s => s.completed).length, 0)}</p></div>
+            <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-950/40 p-2 rounded-xl border border-gray-800/50"><p className="text-[7px] font-black text-gray-600 uppercase mb-0.5">Volume Estimado</p><p className="text-xs font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.reduce((c, d) => c + d.weight, 0), 0)}kg</p></div>
+                <div className="bg-gray-950/40 p-2 rounded-xl border border-gray-800/50"><p className="text-[7px] font-black text-gray-600 uppercase mb-0.5">Séries OK</p><p className="text-xs font-black text-gray-100">{s.exercises.reduce((a, b) => a + b.sets.filter(s => s.completed).length, 0)}</p></div>
             </div>
           </div>
         ))}
@@ -1309,23 +1499,23 @@ const Progress = ({ prs, sessions }: { prs: PersonalRecord[], sessions: WorkoutS
   return (
     <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
       <h1 className="text-3xl font-black mb-8 pt-4">Evolução</h1>
-      <div className="bg-gradient-to-br from-indigo-900/20 to-emerald-900/10 border border-gray-800 rounded-[2rem] p-6 mb-8">
-        <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Tempo Total Acumulado</p>
-        <p className="text-4xl font-black text-white">{formatDurationFull(totalTrainingTime)}</p>
+      <div className="bg-gradient-to-br from-indigo-900/20 to-emerald-900/10 border border-gray-800 rounded-[2rem] p-5 mb-8">
+        <p className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1.5">Tempo Total Acumulado</p>
+        <p className="text-3xl font-black text-white">{formatDurationFull(totalTrainingTime)}</p>
       </div>
-      <h2 className="text-lg font-black text-gray-300 mb-4 uppercase tracking-widest text-center">Melhores Cargas</h2>
-      <div className="grid gap-4">
+      <h2 className="text-sm font-black text-gray-300 mb-4 uppercase tracking-widest text-center">Melhores Cargas</h2>
+      <div className="grid gap-3">
         {prs.length === 0 ? (
-          <div className="text-center py-20 text-gray-600">Complete exercícios para ver seus recordes aqui.</div>
+          <div className="text-center py-16 text-gray-600 text-xs">Complete exercícios para ver seus recordes aqui.</div>
         ) : prs.map(pr => (
-          <div key={pr.exerciseId} className="bg-gray-900 border border-gray-800 p-6 rounded-[2rem] flex justify-between items-center shadow-xl">
+          <div key={pr.exerciseId} className="bg-gray-900 border border-gray-800 p-4 rounded-[1.5rem] flex justify-between items-center shadow-xl">
             <div>
-              <h3 className="font-black text-white text-lg">{pr.exerciseName}</h3>
-              <p className="text-xs text-gray-500 font-bold">{new Date(pr.date).toLocaleDateString()}</p>
+              <h3 className="font-black text-white text-sm">{pr.exerciseName}</h3>
+              <p className="text-[9px] text-gray-500 font-bold">{new Date(pr.date).toLocaleDateString()}</p>
             </div>
             <div className="text-right">
-              <p className="text-3xl font-black text-emerald-400">{pr.weight}<span className="text-xs text-emerald-600 ml-1">kg</span></p>
-              <p className="text-[10px] text-gray-600 uppercase font-black">Carga Máxima</p>
+              <p className="text-2xl font-black text-emerald-400">{pr.weight}<span className="text-[10px] text-emerald-600 ml-0.5">kg</span></p>
+              <p className="text-[7px] text-gray-600 uppercase font-black">Carga Máxima</p>
             </div>
           </div>
         ))}
@@ -1335,28 +1525,32 @@ const Progress = ({ prs, sessions }: { prs: PersonalRecord[], sessions: WorkoutS
 };
 
 export default function App() {
-  const [sessions, setSessions] = useState<WorkoutSession[]>([]);
-  const [prs, setPrs] = useState<PersonalRecord[]>([]);
-  const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
-  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [sessions, setSessions] = useState<WorkoutSession[]>(() => {
+    const saved = localStorage.getItem('titanlift_sessions');
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return parsed.filter((session: any) => (Date.now() - new Date(session.date).getTime()) <= 30 * 24 * 60 * 60 * 1000);
+    } catch { return []; }
+  });
+
+  const [prs, setPrs] = useState<PersonalRecord[]>(() => {
+    const saved = localStorage.getItem('titanlift_prs');
+    try { return saved ? JSON.parse(saved) : []; } catch { return []; }
+  });
+
+  const [templates, setTemplates] = useState<WorkoutTemplate[]>(() => {
+    const saved = localStorage.getItem('titanlift_templates');
+    try { return saved ? JSON.parse(saved) : DEFAULT_TEMPLATES; } catch { return DEFAULT_TEMPLATES; }
+  });
+
+  const [exercises, setExercises] = useState<Exercise[]>(() => {
+    const saved = localStorage.getItem('titanlift_exercises');
+    try { return saved ? JSON.parse(saved) : DEFAULT_EXERCISES; } catch { return DEFAULT_EXERCISES; }
+  });
+
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
-
-  useEffect(() => {
-    const s = localStorage.getItem('titanlift_sessions');
-    const p = localStorage.getItem('titanlift_prs');
-    const t = localStorage.getItem('titanlift_templates');
-    const e = localStorage.getItem('titanlift_exercises');
-    
-    let loadedSessions: WorkoutSession[] = [];
-    if (s) try { loadedSessions = JSON.parse(s); } catch { }
-    const filteredSessions = loadedSessions.filter(session => (Date.now() - new Date(session.date).getTime()) <= 30 * 24 * 60 * 60 * 1000);
-    
-    setSessions(filteredSessions);
-    if (p) try { setPrs(JSON.parse(p)); } catch { }
-    if (t) try { setTemplates(JSON.parse(t)); } catch { setTemplates(DEFAULT_TEMPLATES); } else setTemplates(DEFAULT_TEMPLATES);
-    if (e) try { setExercises(JSON.parse(e)); } catch { setExercises(DEFAULT_EXERCISES); } else setExercises(DEFAULT_EXERCISES);
-  }, []);
 
   useEffect(() => {
     localStorage.setItem('titanlift_sessions', JSON.stringify(sessions));
@@ -1379,7 +1573,7 @@ export default function App() {
       }
     });
     setPrs(updatedPrs);
-    showToast("Treino finalizado e salvo!");
+    showToast("Treino finalizado!");
   };
 
   const updateSessionNotes = (sessionId: string, notes: string) => {
@@ -1405,7 +1599,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home prs={prs} sessions={sessions} templates={templates} />} />
             <Route path="/workouts" element={<WorkoutList templates={templates} onUpdateTemplates={setTemplates} exercises={exercises} onUpdateExercises={setExercises} />} />
-            <Route path="/active/:id" element={<ActiveWorkout prs={prs} templates={templates} exercises={exercises} onUpdateTemplates={setTemplates} onUpdateExercises={setExercises} onSaveSession={saveSession} />} />
+            <Route path="/scan" element={<ScanWorkout onAddTemplate={(t) => setTemplates([t, ...templates])} exercisesList={exercises} onAddExercises={setExercises} />} />
+            <Route path="/active/:id" element={<ActiveWorkoutWrapper prs={prs} templates={templates} exercises={exercises} onUpdateTemplates={setTemplates} onUpdateExercises={setExercises} onSaveSession={saveSession} />} />
             <Route path="/result/:sessionId" element={<WorkoutResult sessions={sessions} onUpdateNotes={updateSessionNotes} />} />
             <Route path="/history" element={<History sessions={sessions} onDeleteSession={deleteSession} />} />
             <Route path="/progress" element={<Progress prs={prs} sessions={sessions} />} />
@@ -1416,3 +1611,4 @@ export default function App() {
     </Router>
   );
 }
+
